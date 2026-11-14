@@ -146,9 +146,20 @@ function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+// Hinter genau einem vertrauenswürdigen Proxy (trust proxy = 1) hängt dieser den echten Client
+// als LETZTEN x-forwarded-for-Eintrag an; vorangestellte Einträge kann der Client fälschen.
+function clientIp(socket) {
+  const xff = socket.handshake.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.trim()) {
+    const last = xff.split(',').pop().trim();
+    if (last) return last;
+  }
+  return socket.handshake.address || 'unknown';
+}
+
 io.on('connection', (socket) => {
   const limiter = new RateLimiter();
-  const ip = socket.handshake.address || 'unknown';
+  const ip = clientIp(socket);
   let violations = 0;
 
   // Wrapper: Rate Limit, Payload-Prüfung, Ack immer genau einmal, Fehler nie nach außen.
