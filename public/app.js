@@ -158,13 +158,13 @@
     for (const [k, t] of fresh) if (now - t > FRESH_MS) fresh.delete(k);
     fresh.set(key, now);
   }
-  function animateIfFresh(el, key, cls, delay = 0) {
+  function animateIfFresh(el, key, cls, delay = 0, prop = '--t') {
     const t = fresh.get(key);
     if (t === undefined) return;
     const age = performance.now() - t;
     if (age > FRESH_MS) { fresh.delete(key); return; }
     el.classList.add(cls);
-    el.style.setProperty('--t', `${Math.round(delay - age)}ms`);
+    el.style.setProperty(prop, `${Math.round(delay - age)}ms`);
   }
 
   // ---------- Netzwerk ----------
@@ -527,6 +527,11 @@
       for (const id of q.answeredIds) if (!had.has(id)) markFresh(`pill:${q.id}:${id}`);
     }
 
+    // Rundenstart: Karten werden ausgeteilt.
+    if (now.phase === 'playing' && (before.phase !== 'playing' || before.roundNumber !== now.roundNumber)) {
+      markFresh(`deal:${now.roundNumber}`);
+    }
+
     // Zugwechsel.
     const turnKey = (s) => `${s.roundNumber}:${s.phase}:${s.turn.currentId}`;
     if (now.phase === 'playing' && turnKey(before) !== turnKey(now) && now.turn.currentId) {
@@ -746,7 +751,7 @@
     if (sig === sigs.cards) return;
     sigs.cards = sig;
 
-    const cards = playing.map((p) => {
+    const cards = playing.map((p, i) => {
       const isTurn = state.phase === 'playing' && p.id === state.turn.currentId;
       const classes = ['card'];
       if (isTurn) classes.push('is-turn');
@@ -774,6 +779,7 @@
         'data-player-id': p.id,
         'data-champion-id': p.champion ? p.champion.id : null,
       }, h('div', { class: 'card-inner' }, portrait, body));
+      animateIfFresh(li, `deal:${state.roundNumber}`, 'is-dealt', Math.min(i, 9) * 70, '--deal-t');
       if (isTurn) animateIfFresh(li, `turn:${state.roundNumber}:${p.id}`, 'turn-in');
       if (p.isYou) animateIfFresh(li, `reveal:${state.roundNumber}:${p.id}`, 'reveal');
       return li;

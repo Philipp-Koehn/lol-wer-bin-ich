@@ -63,6 +63,12 @@
   --s6: 2rem;
   --s7: 3rem;
 
+  /* Tiefe: weiche, weit gestreute Schatten statt harter Kanten, dazu eine feine
+     Lichtkante oben (wie poliertes Metall). */
+  --edge-light: inset 0 1px 0 rgba(240, 230, 210, 0.05);
+  --shadow-soft: 0 24px 48px -28px rgba(0, 0, 0, 0.75);
+  --shadow-float: 0 18px 44px -16px rgba(0, 0, 0, 0.7);
+
   color-scheme: dark;
 }
 
@@ -83,10 +89,13 @@ body {
   font-family: var(--font-body);
   font-size: 1rem;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-h1, h2, h3 { font-family: var(--font-display); font-weight: 400; color: var(--gold-hi); margin: 0; }
-p { margin: 0; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 400; color: var(--gold-hi); margin: 0; text-wrap: balance; }
+p { margin: 0; text-wrap: pretty; }
 button, input { font: inherit; color: inherit; }
 button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 img { display: block; max-width: 100%; }
@@ -161,10 +170,11 @@ input[type='text'] {
   width: 100%; min-height: 44px; padding: 0 var(--s3);
   background: #040b15; border: 1px solid var(--line-strong); border-radius: 0;
   color: var(--gold-hi);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 input[type='text']::placeholder { color: #7a8ca2; opacity: 1; }
-input[type='text']:focus { border-color: var(--gold); outline: none; box-shadow: 0 0 0 1px var(--gold); }
+input[type='text']:focus { border-color: var(--gold); outline: none; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--gold), 0 0 18px -6px rgba(200, 170, 110, 0.45); }
 input[type='text'][aria-invalid='true'] { border-color: var(--red); }
 
 .field { display: grid; gap: var(--s1); }
@@ -191,6 +201,7 @@ button.chip:active { transform: scale(0.97); }
   background: linear-gradient(180deg, var(--deep), #08162a);
   border: 1px solid var(--line);
   padding: var(--s4);
+  box-shadow: var(--edge-light), var(--shadow-soft);
 }
 .panel-title { font-size: 1.25rem; margin-bottom: var(--s3); display: flex; align-items: baseline; gap: var(--s2); }
 .count { font-family: var(--font-body); font-size: 0.9375rem; color: var(--muted); }
@@ -204,7 +215,7 @@ button.chip:active { transform: scale(0.97); }
 .toast {
   background: var(--raised); border: 1px solid var(--gold-dim); border-left: 3px solid var(--gold);
   padding: var(--s3) var(--s4); color: var(--gold-hi); font-size: 0.9375rem; overflow-wrap: anywhere;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--edge-light), var(--shadow-float);
   animation: rise-in-md 220ms var(--ease-out);
   transition: opacity 160ms ease-out, transform 160ms ease-out;
 }
@@ -242,9 +253,13 @@ button.chip:active { transform: scale(0.97); }
 }
 .crest-q { position: relative; font-family: var(--font-display); font-size: 3rem; color: var(--cyan); line-height: 1; }
 
-.home-title { font-size: clamp(2.75rem, 9vw, 5.25rem); line-height: 1; display: grid; gap: var(--s2); }
-.home-kicker { font-family: var(--font-body); font-size: 1rem; color: var(--gold); letter-spacing: 0.06em; }
-.home-lead { max-width: 34em; color: var(--text); font-size: 1.0625rem; }
+.home-title { font-size: clamp(2.75rem, 9vw, 5.25rem); line-height: 1; letter-spacing: -0.01em; display: grid; gap: var(--s3); text-shadow: 0 0 48px rgba(200, 170, 110, 0.18); }
+/* Kleine Überzeile in Versalien mit weiter Laufweite (wie im Client-Menü) */
+.home-kicker, .lobby-label {
+  font-family: var(--font-body); font-size: 0.8125rem; font-weight: 500; color: var(--gold);
+  letter-spacing: 0.2em; text-transform: uppercase; text-shadow: none;
+}
+.home-lead { max-width: 34em; color: var(--text); font-size: 1.0625rem; line-height: 1.6; }
 
 .home-forms {
   width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); text-align: left;
@@ -252,16 +267,18 @@ button.chip:active { transform: scale(0.97); }
 .home-forms > .field, .home-forms > .form-error { grid-column: 1 / -1; }
 .home-forms > .field { max-width: 360px; justify-self: center; width: 100%; }
 .home-forms > .form-error { text-align: center; }
+/* Spalte statt Grid: so sitzen die Knöpfe beider Karten auf derselben Grundlinie. */
 .home-card {
-  display: grid; gap: var(--s3); align-content: start;
+  display: flex; flex-direction: column; gap: var(--s3);
   padding: var(--s5); background: linear-gradient(180deg, var(--deep), #08162a);
   border: 1px solid var(--line); border-top: 2px solid var(--gold-dim);
-  transition: border-color 200ms ease;
+  box-shadow: var(--edge-light), var(--shadow-soft);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
 }
-.home-card:focus-within { border-top-color: var(--gold); }
+.home-card:focus-within { border-top-color: var(--gold); box-shadow: var(--edge-light), var(--shadow-soft), 0 -12px 32px -24px rgba(200, 170, 110, 0.6); }
 .home-card h2 { font-size: 1.5rem; }
 .home-card p { color: var(--muted); font-size: 0.9375rem; }
-.home-card .btn { justify-self: start; margin-top: auto; }
+.home-card .btn { align-self: flex-start; margin-top: auto; }
 .data-note { color: var(--muted); font-size: 0.8125rem; }
 .rejoin-box {
   width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s3);
@@ -275,7 +292,6 @@ button.chip:active { transform: scale(0.97); }
 
 .screen-lobby { max-width: 1000px; margin: 0 auto; display: grid; gap: var(--s5); }
 .lobby-head { text-align: center; display: grid; justify-items: center; gap: var(--s2); padding-top: var(--s4); }
-.lobby-label { color: var(--gold); }
 .room-code {
   font-family: var(--font-display); font-size: clamp(3rem, 12vw, 5.5rem); line-height: 1.1;
   letter-spacing: 0.18em; padding: var(--s2) var(--s4) var(--s2) calc(var(--s4) + 0.18em);
@@ -341,6 +357,7 @@ button.chip:active { transform: scale(0.97); }
   position: relative; padding: var(--s5); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3);
   background: linear-gradient(180deg, #0c2038, #08172b);
   border: 1px solid var(--line); border-top: 0;
+  box-shadow: var(--shadow-soft);
   isolation: isolate;
 }
 /* Oberkante als eigenes Element: lässt sich beim Zugwechsel per transform einblenden. */
@@ -392,7 +409,7 @@ button.chip:active { transform: scale(0.97); }
   position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin: 2px 0 0; padding: var(--s1) 0;
   list-style: none; max-height: 320px; overflow-y: auto; overscroll-behavior: contain;
   background: #071324; border: 1px solid var(--gold-dim);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--edge-light), var(--shadow-float);
 }
 /* Bewusst ohne Animation: wird bei jedem Tastendruck aktualisiert. */
 .combo-list li {
@@ -471,6 +488,18 @@ button.chip:active { transform: scale(0.97); }
   animation: glow-out 700ms var(--ease-out); animation-delay: var(--t, 0ms);
 }
 @keyframes glow-out { from { opacity: 1; } to { opacity: 0; } }
+
+/* Rundenstart: Karten werden nacheinander ausgeteilt, die eigene Raute dreht sich wie
+   beim Auslosen ein. Nur transform/opacity, Startversatz pro Karte über --deal-t. */
+.card.is-dealt { animation: deal 520ms var(--ease-out) backwards; animation-delay: var(--deal-t, 0ms); }
+@keyframes deal {
+  from { opacity: 0; transform: translateY(22px) rotate(-3deg) scale(0.94); }
+}
+.card.is-dealt .portrait img { animation: settle 700ms var(--ease-out) backwards; animation-delay: calc(var(--deal-t, 0ms) + 120ms); }
+@keyframes settle { from { opacity: 0; transform: scale(1.22); } }
+.card.is-dealt .sealed::before { animation: draw-lot 820ms var(--ease-out) backwards; animation-delay: calc(var(--deal-t, 0ms) + 140ms); }
+@keyframes draw-lot { from { opacity: 0; transform: rotate(-135deg) scale(0.55); } }
+.card.is-dealt .sealed span { animation: pop-in 360ms var(--ease-out) backwards; animation-delay: calc(var(--deal-t, 0ms) + 640ms); }
 
 /* Versiegelte eigene Karte */
 .sealed {
@@ -595,7 +624,11 @@ button.chip:active { transform: scale(0.97); }
   .card.reveal .card-inner,
   .verdict.is-new,
   .answer-progress .pill.is-new,
-  .rules-pop { animation-name: fade-in; }
+  .rules-pop,
+  .card.is-dealt,
+  .card.is-dealt .portrait img,
+  .card.is-dealt .sealed::before,
+  .card.is-dealt .sealed span { animation-name: fade-in; }
   .card.reveal .portrait::before,
   .card.turn-in .portrait::after,
   .turn-panel.turn-flash::before,
