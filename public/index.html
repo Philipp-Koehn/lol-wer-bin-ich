@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LoL – Wer bin ich?</title>
+  <meta name="description" content="Errate deinen League-of-Legends-Champion mit Ja/Nein-Fragen. Multiplayer im Browser.">
+  <meta name="theme-color" content="#06101E">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus&family=Spline+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Zum Inhalt springen</a>
+
+  <div id="conn-banner" class="conn-banner" role="status" hidden>Verbindung unterbrochen. Verbinde neu …</div>
+  <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <main id="main">
+    <!-- ============ Startseite ============ -->
+    <section id="screen-home" class="screen screen-home" aria-labelledby="home-title" hidden>
+      <div class="home-crest" aria-hidden="true">
+        <span class="crest-ring"></span>
+        <span class="crest-q">?</span>
+      </div>
+      <h1 id="home-title" class="home-title">
+        <span class="home-kicker">League of Legends</span>
+        Wer bin ich?
+      </h1>
+      <p class="home-lead">Alle sehen deinen Champion, nur du nicht. Stell Ja/Nein-Fragen, bis du weißt, wer du bist.</p>
+
+      <div id="rejoin-box" class="rejoin-box" hidden>
+        <p id="rejoin-text"></p>
+        <div class="rejoin-actions">
+          <button id="rejoin-btn" class="btn btn-cyan" type="button">Wieder beitreten</button>
+          <button id="rejoin-dismiss" class="btn btn-ghost btn-sm" type="button">Verwerfen</button>
+        </div>
+      </div>
+
+      <div class="home-forms">
+        <div class="field">
+          <label for="name-input">Dein Name</label>
+          <input id="name-input" type="text" maxlength="20" autocomplete="nickname" spellcheck="false" placeholder="z. B. Faker">
+        </div>
+
+        <form id="create-form" class="home-card" novalidate>
+          <h2>Neuer Raum</h2>
+          <p>Du wirst Host und startest die Runden.</p>
+          <button type="submit" class="btn btn-gold">Raum erstellen</button>
+        </form>
+
+        <form id="join-form" class="home-card" novalidate>
+          <h2>Raum beitreten</h2>
+          <div class="field">
+            <label for="code-input">Raumcode</label>
+            <input id="code-input" type="text" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCDE" inputmode="text">
+          </div>
+          <button type="submit" class="btn btn-outline">Beitreten</button>
+        </form>
+        <p id="home-error" class="form-error" role="alert"></p>
+      </div>
+      <p id="data-note" class="data-note"></p>
+    </section>
+
+    <!-- ============ Lobby ============ -->
+    <section id="screen-lobby" class="screen screen-lobby" aria-labelledby="lobby-title" hidden>
+      <header class="lobby-head">
+        <h1 id="lobby-title" class="visually-hidden">Lobby</h1>
+        <p class="lobby-label">Raumcode zum Teilen</p>
+        <button id="lobby-code" class="room-code" type="button" aria-label="Raumcode kopieren"></button>
+        <p id="copy-hint" class="lobby-hint">Klicken zum Kopieren des Einladungslinks</p>
+      </header>
+
+      <div class="lobby-grid">
+        <section class="panel" aria-labelledby="lobby-players-title">
+          <h2 id="lobby-players-title" class="panel-title">Beschwörer <span id="lobby-count" class="count"></span></h2>
+          <ul id="lobby-players" class="lobby-players"></ul>
+          <div class="lobby-actions">
+            <button id="start-btn" class="btn btn-gold" type="button">Runde starten</button>
+            <p id="lobby-wait" class="muted"></p>
+          </div>
+        </section>
+        <section class="panel rules" aria-labelledby="rules-title">
+          <h2 id="rules-title" class="panel-title">So läuft's</h2>
+          <ol class="rules-list">
+            <li>Jeder bekommt zufällig einen Champion. Du siehst alle anderen, deinen eigenen nicht.</li>
+            <li>Wer dran ist, stellt eine Ja/Nein-Frage, z. B. „Bin ich ein Mage?“</li>
+            <li data-rule="answers"></li>
+            <li data-rule="turn"></li>
+            <li>Du kannst jederzeit in deinem Zug raten. Richtig: du bist raus und platziert.</li>
+            <li data-rule="scoring"></li>
+          </ol>
+        </section>
+      </div>
+      <button id="lobby-leave" class="btn btn-ghost leave-btn" type="button">Raum verlassen</button>
+    </section>
+
+    <!-- ============ Spiel ============ -->
+    <section id="screen-game" class="screen screen-game" aria-labelledby="game-title" hidden>
+      <header class="game-bar">
+        <h1 id="game-title" class="game-brand">Wer bin ich?</h1>
+        <button id="game-code" class="chip" type="button" aria-label="Raumcode kopieren"></button>
+        <span id="round-label" class="chip chip-plain"></span>
+        <div class="game-bar-actions">
+          <button id="rules-btn" class="btn btn-ghost btn-sm" type="button" aria-expanded="false" aria-controls="rules-pop">Regeln</button>
+          <button id="restart-btn" class="btn btn-ghost btn-sm" type="button" hidden>Neu starten</button>
+          <button id="game-leave" class="btn btn-ghost btn-sm" type="button">Verlassen</button>
+        </div>
+      </header>
+      <div id="rules-pop" class="rules-pop" hidden>
+        <p data-rule="answers"></p>
+        <p data-rule="turn"></p>
+        <p data-rule="scoring"></p>
+      </div>
+
+      <div class="game-layout">
+        <div class="game-main">
+          <section id="turn-panel" class="turn-panel" aria-live="polite" aria-labelledby="turn-title">
+            <h2 id="turn-title" class="turn-title"></h2>
+            <p id="turn-sub" class="turn-sub"></p>
+
+            <!-- Fragender -->
+            <form id="ask-form" class="ask-form" novalidate hidden>
+              <label for="ask-input" class="visually-hidden">Deine Frage</label>
+              <input id="ask-input" type="text" maxlength="140" autocomplete="off" placeholder="Bin ich ein Mage?">
+              <button type="submit" class="btn btn-cyan">Fragen</button>
+            </form>
+
+            <!-- Antwortende -->
+            <div id="answer-box" class="answer-box" hidden>
+              <p id="answer-question" class="answer-question"></p>
+              <div class="answer-buttons">
+                <button id="yes-btn" class="btn btn-yes" type="button">Ja</button>
+                <button id="no-btn" class="btn btn-no" type="button">Nein</button>
+              </div>
+            </div>
+
+            <div id="answer-progress" class="answer-progress" hidden></div>
+
+            <!-- Raten -->
+            <div id="guess-box" class="guess-box" hidden>
+              <div class="combo">
+                <label for="guess-input" class="guess-label">Champion raten</label>
+                <div class="combo-row">
+                  <input id="guess-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="guess-list" autocomplete="off" spellcheck="false" placeholder="Name eintippen …">
+                  <button id="guess-btn" class="btn btn-gold" type="button" disabled>Raten</button>
+                </div>
+                <ul id="guess-list" class="combo-list" role="listbox" aria-label="Vorschläge" hidden></ul>
+              </div>
+              <button id="pass-btn" class="btn btn-ghost btn-sm pass-btn" type="button">Zug weitergeben</button>
+            </div>
+
+            <!-- Rundenende -->
+            <div id="round-end" class="round-end" hidden>
+              <ol id="round-ranking" class="round-ranking"></ol>
+              <button id="next-round-btn" class="btn btn-gold" type="button">Nächste Runde starten</button>
+              <p id="next-round-wait" class="muted"></p>
+            </div>
+          </section>
+
+          <section class="board" aria-labelledby="board-title">
+            <h2 id="board-title" class="visually-hidden">Champions am Tisch</h2>
+            <ul id="cards" class="cards"></ul>
+          </section>
+        </div>
+
+        <aside class="game-side">
+          <section class="panel log-panel" aria-labelledby="log-title">
+            <h2 id="log-title" class="panel-title">Verlauf</h2>
+            <ol id="log" class="log" aria-live="off"></ol>
+            <form id="chat-form" class="chat-form" novalidate>
+              <label for="chat-input" class="visually-hidden">Nachricht</label>
+              <input id="chat-input" type="text" maxlength="200" autocomplete="off" placeholder="Nachricht an alle">
+              <button type="submit" class="btn btn-ghost btn-sm">Senden</button>
+            </form>
+          </section>
+          <section class="panel" aria-labelledby="score-title">
+            <h2 id="score-title" class="panel-title">Rangliste</h2>
+            <ol id="scores" class="scores"></ol>
+          </section>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
