@@ -33,6 +33,10 @@
   let state = null;
   let prev = null; // zuletzt gerenderter Zustand (für Animationen und Ansagen)
   let session = loadSession();
+  // Die Startseite ist im HTML sichtbar. Wird gleich eine Sitzung wiederaufgenommen
+  // (Reload im Spiel), sofort ausblenden, damit sie nicht kurz aufblitzt.
+  if (isSession(session)) $('screen-home').hidden = true;
+  const HOME_TITLE = document.title;
   let lastOwnVisible = null;
   let lastTurnWasMine = false;
   let guessSelection = null;
@@ -210,6 +214,7 @@
     for (const k of Object.keys(sigs)) sigs[k] = '';
     clearSession();
     showScreen('home');
+    document.title = HOME_TITLE;
   }
 
   async function resume() {
@@ -227,6 +232,13 @@
     else if (!state) showScreen('home');
   });
   socket.on('disconnect', () => { if (session) $('conn-banner').hidden = false; });
+  // Vom Server abgewiesen (z. B. zu viele Verbindungen): Socket.IO versucht es dann nicht
+  // selbst erneut, also nach einer Pause manuell.
+  socket.on('connect_error', (err) => {
+    if (socket.active) return;
+    toast(err && err.message ? err.message : 'Verbindung abgelehnt.', true);
+    setTimeout(() => socket.connect(), 8000);
+  });
   socket.on('state', (s) => { state = s; render(); });
   socket.on('session:replaced', () => {
     dropSession();
@@ -533,8 +545,17 @@
   }
 
   // ---------- Rendering ----------
+  // Verbindung zum Bild-CDN aufbauen, sobald man in einem Raum ist (vor den ersten Karten).
+  let preconnected = false;
+  function preconnectImages() {
+    if (preconnected) return;
+    preconnected = true;
+    document.head.append(h('link', { rel: 'preconnect', href: 'https://ddragon.leagueoflegends.com' }));
+  }
+
   function render() {
     if (!state) return showScreen('home');
+    preconnectImages();
     const said = diffState(prev, state);
     document.querySelectorAll('[data-rule]').forEach((el) => { el.textContent = state.rules[el.dataset.rule] || ''; });
     const codeLabel = `Raumcode ${state.code.split('').join(' ')}, Einladungslink kopieren`;

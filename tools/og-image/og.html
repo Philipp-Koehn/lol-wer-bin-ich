@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'Marcellus'; src: url('FONTDIR/marcellus-latin.woff2') format('woff2'); }
+  @font-face { font-family: 'Spline Sans'; src: url('FONTDIR/spline-sans-latin.woff2') format('woff2'); font-weight: 400 600; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    position: relative;
+    background:
+      radial-gradient(ellipse 70% 80% at 78% 50%, rgba(10, 200, 185, 0.14) 0%, transparent 60%),
+      radial-gradient(ellipse 90% 70% at 30% -10%, #163a6b 0%, transparent 65%),
+      #06101e;
+    color: #cdd6df; font-family: 'Spline Sans', sans-serif;
+  }
+  /* feines Rautenmuster */
+  body::before {
+    content: ''; position: absolute; inset: 0; opacity: 0.5;
+    background-image:
+      linear-gradient(45deg, rgba(200, 170, 110, 0.035) 1px, transparent 1px),
+      linear-gradient(-45deg, rgba(200, 170, 110, 0.035) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .frame {
+    position: absolute; inset: 28px;
+    border: 1px solid rgba(200, 170, 110, 0.45);
+  }
+  .frame::after {
+    content: ''; position: absolute; inset: 8px; border: 1px solid rgba(120, 90, 40, 0.5);
+  }
+  .left { position: absolute; left: 92px; top: 0; bottom: 0; width: 600px; display: flex; flex-direction: column; justify-content: center; gap: 22px; }
+  .kicker { font-size: 26px; color: #c8aa6e; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 500; }
+  h1 { font-family: 'Marcellus', serif; font-weight: 400; font-size: 100px; line-height: 1; white-space: nowrap; color: #f0e6d2; text-shadow: 0 0 40px rgba(200, 170, 110, 0.25); }
+  .rule { width: 120px; height: 2px; background: linear-gradient(90deg, #c8aa6e, transparent); }
+  .lead { font-size: 31px; line-height: 1.35; color: #cdd6df; max-width: 520px; }
+  .meta { font-size: 23px; color: #8a9bb0; display: flex; gap: 14px; align-items: center; white-space: nowrap; }
+  .meta i { flex: none; width: 7px; height: 7px; background: #c8aa6e; transform: rotate(45deg); display: inline-block; }
+
+  .cards { position: absolute; right: 70px; top: 50%; width: 430px; height: 420px; transform: translateY(-50%); }
+  .card {
+    position: absolute; width: 200px; height: 290px; padding: 3px;
+    background: linear-gradient(160deg, #f0e6d2 0%, #c8aa6e 30%, #785a28 65%, #c8aa6e 100%);
+    clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px);
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+  }
+  .card .in {
+    width: 100%; height: 100%; position: relative; display: grid; place-items: center;
+    clip-path: polygon(17px 0, calc(100% - 17px) 0, 100% 17px, 100% calc(100% - 17px), calc(100% - 17px) 100%, 17px 100%, 0 calc(100% - 17px), 0 17px);
+    background:
+      repeating-conic-gradient(from 0deg at 50% 42%, rgba(200, 170, 110, 0.08) 0deg 15deg, transparent 15deg 30deg),
+      radial-gradient(circle at 50% 42%, #12305a 0%, #071324 72%);
+  }
+  .card .gem {
+    position: absolute; left: 50%; top: 42%; width: 104px; height: 104px; margin: -52px 0 0 -52px; transform: rotate(45deg);
+    border: 2px solid #c8aa6e; box-shadow: 0 0 0 6px #071324, 0 0 0 7px #785a28, 0 0 36px rgba(10, 200, 185, 0.35);
+  }
+  .card .q { position: absolute; left: 0; right: 0; top: 42%; transform: translateY(-50%); text-align: center; font-family: 'Marcellus', serif; font-size: 78px; line-height: 1; color: #0ac8b9; }
+  .card .name { position: absolute; left: 0; right: 0; bottom: 26px; text-align: center; font-family: 'Marcellus', serif; font-size: 25px; color: #f0e6d2; }
+  .c1 { left: 0; top: 74px; transform: rotate(-9deg); opacity: 0.8; }
+  .c3 { right: 0; top: 74px; transform: rotate(9deg); opacity: 0.8; }
+  .c2 { left: 115px; top: 40px; z-index: 2; width: 210px; height: 310px;
+        background: linear-gradient(160deg, #c9fbf6 0%, #0ac8b9 40%, #0a5c58 70%, #0ac8b9 100%); }
+  .c2 .name { color: #0ac8b9; }
+</style>
+</head>
+<body>
+  <div class="frame"></div>
+  <div class="left">
+    <p class="kicker">League of Legends</p>
+    <h1>Wer bin ich?</h1>
+    <div class="rule"></div>
+    <p class="lead">Alle sehen deinen Champion, nur du nicht. Errate ihn mit Ja/Nein-Fragen.</p>
+    <p class="meta">Multiplayer im Browser <i></i> 2–10 Spieler <i></i> ohne Anmeldung</p>
+  </div>
+  <div class="cards">
+    <div class="card c1"><div class="in"><span class="gem"></span><span class="q">?</span></div></div>
+    <div class="card c3"><div class="in"><span class="gem"></span><span class="q">?</span></div></div>
+    <div class="card c2"><div class="in"><span class="gem"></span><span class="q">?</span><span class="name">Wer bin ich?</span></div></div>
+  </div>
+</body>
+</html>

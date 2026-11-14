@@ -18,6 +18,13 @@ class RateLimiter {
     return true;
   }
 
+  // Wie allow(), zählt aber keinen Treffer (z. B. nur Fehlversuche zählen, vorher prüfen).
+  wouldAllow(key, max, windowMs, now = Date.now()) {
+    const list = this.hits.get(key);
+    if (!list) return true;
+    return list.filter((t) => now - t < windowMs).length < max;
+  }
+
   prune(now = Date.now(), maxAgeMs = 15 * 60_000) {
     for (const [key, list] of this.hits) {
       if (!list.length || now - list[list.length - 1] > maxAgeMs) this.hits.delete(key);
