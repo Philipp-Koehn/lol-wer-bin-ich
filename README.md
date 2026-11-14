@@ -42,8 +42,23 @@ Beim Start lädt der Server die neueste Version von Riot Data Dragon
 (`api/versions.json` → `cdn/<version>/data/de_DE/champion.json`) und
 aktualisiert sie alle 12 Stunden. Ist Data Dragon nicht erreichbar, nutzt er
 den letzten Cache in `data/champions-cache.json` und sonst die mitgelieferte
-Liste `server/fallback-champions.json`. Bilder kommen direkt vom Data-Dragon-CDN;
-fehlen sie, zeigt die Karte die Initialen.
+Liste `server/fallback-champions.json`. Bilder kommen direkt vom Data-Dragon-CDN:
+die Karten zeigen das Ladebildschirm-Artwork (`cdn/img/champion/loading/<id>_0.jpg`),
+die Großansicht (Klick auf eine Karte) das Splash-Art bzw. auf dem Handy das Hochformat.
+Fehlt ein Artwork, nimmt der Client das quadratische Icon, fehlt auch das, die Initialen.
+
+## Spielseite
+
+- **Frage-Bühne:** Die offene Frage steht groß mit Porträt und Champion des Fragenden,
+  darunter der Antwortstatus („Geantwortet“ / „Fehlt noch“, Zähler und Balken). Wie die
+  anderen geantwortet haben, zeigt der Server erst nach der Auflösung; dann erscheint das
+  Ergebnis mit allen Einzelantworten, bis die nächste Frage oder ein Tipp kommt.
+- **Ja/Nein auf dem Handy:** Scrollt man zu den Karten, docken die Knöpfe samt Frage unten an.
+- **Fragen & Verlauf:** Filter Alles / Fragen / Meine mit Zählern, eigene Fragen sind markiert,
+  Ja/Nein immer mit Symbol und Text. Wer hochgescrollt hat, bekommt „Zur neuesten“.
+- **Karten:** Größe richtet sich nach der Spielerzahl (2 bis 10). Klick, Tipp oder Enter öffnet
+  die Großansicht; Escape, „Schließen“ oder ein Klick daneben schließt sie, der Fokus kehrt
+  zur Karte zurück. Die eigene Karte bleibt verdeckt, bis sie erraten ist.
 
 ## Hosting (Render, Railway o. ä.)
 
@@ -140,7 +155,8 @@ TURN_SKIP_MS=3000 PORT=3210 npm start          # in einem zweiten Terminal
 BASE_URL=http://localhost:3210 python test/e2e_game.py
 ```
 
-Der Test legt Screenshots in `screenshots/` ab.
+Der Test legt Screenshots in `screenshots/` ab (Start, Lobby, Spiel mit offener Frage,
+Rundenende, Runde 2, Großansicht; jeweils Desktop 1440 px und Handy 390 px).
 
 ## Aufbau
 

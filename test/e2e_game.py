@@ -10,7 +10,8 @@ Geprüft wird u. a.:
   * falscher Tipp -> nächster, richtiger Tipp -> Platzierung + Aufdecken
   * Reconnect per Reload, Rangliste/Punkte, Neustart, Verlassen
   * XSS-Name wird als Text dargestellt, Rate Limit greift
-  * Screenshots Lobby/Spiel/Rundenende auf Desktop und Handy-Breite
+  * Frage-Bühne (Antwortstatus, Ergebnis), Verlaufsfilter, Großansicht mit Fokus-Rückgabe
+  * Screenshots Lobby/Spiel/Rundenende/Großansicht auf Desktop und Handy-Breite
 """
 import json
 import os
@@ -252,6 +253,9 @@ def main():
         expect(first.page.locator("#log li.is-yes")).to_have_count(1)
         wait_turn(players, first.id)
         check(current_id(second.page) == first.id, "Nach Ja ist derselbe Spieler weiter dran")
+        expect(first.page.locator("#q-result")).to_contain_text("Ergebnis: Ja")
+        expect(second.page.locator("#q-result")).to_contain_text(f"{third.name}: Ja")
+        check(True, "Frage-Bühne zeigt Ergebnis und Einzelantworten der letzten Frage")
 
         print("Gleichstand zählt als Nein: Zug geht weiter")
         ask(first, "Kann ich fliegen?")
@@ -259,6 +263,9 @@ def main():
         expect(o1.page.locator("#yes-btn")).to_be_visible()
         expect(cleo.page.locator("#answer-progress")).to_be_visible()
         expect(ana.page.locator("#answer-progress")).to_be_visible()
+        expect(first.page.locator("#answer-question")).to_have_text("Kann ich fliegen?")
+        expect(first.page.locator("#answer-progress")).to_contain_text("Fehlt noch (2)")
+        check(first.page.locator("#q-portrait .sealed").count() == 1, "Fragender sieht in der Bühne nur die verdeckte eigene Karte")
         shot(ana, "04-spiel-frage-desktop.png")
         shot(cleo, "05-spiel-frage-mobile.png")
         no_horizontal_scroll(cleo, "Spiel mobil")
@@ -269,6 +276,20 @@ def main():
         expect(ana.page.locator("#log li.is-no")).to_have_count(1)
         expect(ana.page.locator("#log li.is-no")).to_contain_text(f"{o1.name}: Ja")
         check(True, "Nach 1x Ja / 1x Nein ist der nächste Spieler dran (Gleichstand = Nein)")
+
+        print("Verlauf filtern")
+        fp = first.page
+        expect(fp.locator("#count-mine")).to_have_text("2")
+        fp.click('.log-filter [data-filter="mine"]')
+        expect(fp.locator('.log-filter [data-filter="mine"]')).to_have_attribute("aria-pressed", "true")
+        expect(fp.locator("#log > li.q-entry.is-mine")).to_have_count(2)
+        check(fp.locator("#log > li.is-system").count() == 0, "Filter 'Meine' zeigt nur eigene Fragen, keine Systemmeldungen")
+        others_view = next(p for p in players if p is not first).page
+        others_view.click('.log-filter [data-filter="mine"]')
+        expect(others_view.locator("#log > li.log-empty")).to_have_count(1)
+        others_view.click('.log-filter [data-filter="all"]')
+        fp.click('.log-filter [data-filter="all"]')
+        check(True, "Filter 'Meine' hebt eigene Fragen hervor, leerer Zustand bei anderen")
 
         print("Falscher Tipp")
         taken = {c["id"] for c in champ_of.values()}
@@ -314,6 +335,23 @@ def main():
         ana.page.wait_for_timeout(900)  # Aufdeck-Animation abwarten
         shot(ana, "06-rundenende-desktop.png")
         shot(cleo, "07-rundenende-mobile.png")
+
+        print("Großansicht")
+        for p, name in ((ana, "10-lightbox-desktop.png"), (cleo, "11-lightbox-mobile.png")):
+            target = next(o for o in players if o is not p)
+            zoom = p.card(target.id).locator(".card-zoom")
+            zoom.focus()
+            p.page.keyboard.press("Enter")
+            expect(p.page.locator("#lightbox")).to_be_visible()
+            expect(p.page.locator("#lb-name")).to_have_text(champ_of[target.id]["name"])
+            check(p.page.evaluate("document.activeElement.id") == "lb-close", f"{p.name}: Fokus springt in die Großansicht")
+            p.page.wait_for_timeout(900)  # Splash-Art laden
+            p.page.screenshot(path=os.path.join(OUT, name))
+            print(f"  shot {name}")
+            p.page.keyboard.press("Escape")
+            expect(p.page.locator("#lightbox")).to_be_hidden()
+            check(p.page.evaluate("document.activeElement.classList.contains('card-zoom')"), f"{p.name}: Escape schließt, Fokus zurück auf der Karte")
+        check(cleo.card(cleo.id).locator(".card-zoom").count() == 1, "Aufgedeckte eigene Karte lässt sich nach Rundenende groß ansehen")
 
         print("Runde 2 und Neustart")
         marks = {p.name: len(p.raw) for p in players}
