@@ -153,6 +153,13 @@ def guess(player, champ):
 
 
 def shot(player, name):
+    # Laufende Ein-/Ausblendungen abwarten, damit Screenshots den Endzustand zeigen
+    # (kurz vorher warten, falls gerade noch ein Zustand vom Server eintrifft).
+    player.page.wait_for_timeout(150)
+    player.page.evaluate("""() => Promise.race([
+        Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))),
+        new Promise(r => setTimeout(r, 2000)),
+    ])""")
     path = os.path.join(OUT, name)
     player.page.screenshot(path=path, full_page=True)
     print(f"  shot {path}")
@@ -251,6 +258,7 @@ def main():
         o1, o2 = others(first)
         expect(o1.page.locator("#yes-btn")).to_be_visible()
         expect(cleo.page.locator("#answer-progress")).to_be_visible()
+        expect(ana.page.locator("#answer-progress")).to_be_visible()
         shot(ana, "04-spiel-frage-desktop.png")
         shot(cleo, "05-spiel-frage-mobile.png")
         no_horizontal_scroll(cleo, "Spiel mobil")
