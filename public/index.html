@@ -154,23 +154,33 @@
             <h2 id="turn-title" class="turn-title" tabindex="-1"></h2>
             <p id="turn-sub" class="turn-sub"></p>
 
+            <!-- Frage-Bühne: offene Frage oder Ergebnis der letzten Frage -->
+            <div id="q-stage" class="q-stage" hidden>
+              <div id="q-portrait" class="q-portrait"></div>
+              <div class="q-main">
+                <p id="q-meta" class="q-meta"></p>
+                <p id="answer-question" class="q-text"></p>
+
+                <!-- Antwortende -->
+                <div id="answer-box" class="answer-box" hidden>
+                  <div class="answer-buttons" role="group" aria-label="Deine Antwort">
+                    <p id="dock-q" class="dock-q" aria-hidden="true"></p>
+                    <button id="yes-btn" class="btn btn-yes" type="button"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8.5l3.5 3.5 7.5-8"/></svg>Ja</button>
+                    <button id="no-btn" class="btn btn-no" type="button"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9m0-9l-9 9"/></svg>Nein</button>
+                  </div>
+                </div>
+
+                <div id="answer-progress" class="answer-progress" hidden></div>
+                <div id="q-result" class="q-result" hidden></div>
+              </div>
+            </div>
+
             <!-- Fragender -->
             <form id="ask-form" class="ask-form" novalidate hidden>
               <label for="ask-input" class="visually-hidden">Deine Frage</label>
               <input id="ask-input" type="text" maxlength="140" autocomplete="off" placeholder="Bin ich ein Mage?">
               <button type="submit" class="btn btn-cyan">Fragen</button>
             </form>
-
-            <!-- Antwortende -->
-            <div id="answer-box" class="answer-box" hidden>
-              <p id="answer-question" class="answer-question"></p>
-              <div class="answer-buttons">
-                <button id="yes-btn" class="btn btn-yes" type="button">Ja</button>
-                <button id="no-btn" class="btn btn-no" type="button">Nein</button>
-              </div>
-            </div>
-
-            <div id="answer-progress" class="answer-progress" hidden></div>
 
             <!-- Raten -->
             <div id="guess-box" class="guess-box" hidden>
@@ -194,29 +204,57 @@
           </section>
 
           <section class="board" aria-labelledby="board-title">
-            <h2 id="board-title" class="visually-hidden">Champions am Tisch</h2>
+            <h2 id="board-title" class="visually-hidden" tabindex="-1">Champions am Tisch</h2>
             <ul id="cards" class="cards"></ul>
           </section>
         </div>
 
-        <aside class="game-side">
-          <section class="panel log-panel" aria-labelledby="log-title">
-            <h2 id="log-title" class="panel-title">Verlauf</h2>
+        <section class="panel log-panel" aria-labelledby="log-title">
+          <div class="log-head">
+            <h2 id="log-title" class="panel-title">Fragen &amp; Verlauf</h2>
+            <div class="log-filter" role="group" aria-label="Verlauf filtern">
+              <button type="button" class="seg" data-filter="all" aria-pressed="true">Alles</button>
+              <button type="button" class="seg" data-filter="questions" aria-pressed="false">Fragen <span class="seg-count" id="count-questions"></span></button>
+              <button type="button" class="seg" data-filter="mine" aria-pressed="false">Meine <span class="seg-count" id="count-mine"></span></button>
+            </div>
+          </div>
+          <div class="log-wrap">
             <ol id="log" class="log" tabindex="0" aria-labelledby="log-title"></ol>
-            <form id="chat-form" class="chat-form" novalidate>
-              <label for="chat-input" class="visually-hidden">Nachricht</label>
-              <input id="chat-input" type="text" maxlength="200" autocomplete="off" placeholder="Nachricht an alle">
-              <button type="submit" class="btn btn-ghost btn-sm">Senden</button>
-            </form>
-          </section>
-          <section class="panel" aria-labelledby="score-title">
-            <h2 id="score-title" class="panel-title">Rangliste</h2>
-            <ol id="scores" class="scores"></ol>
-          </section>
-        </aside>
+            <button id="log-jump" class="log-jump" type="button" hidden>Zur neuesten<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10m-4.5-4.5L8 13l4.5-4.5"/></svg></button>
+          </div>
+          <form id="chat-form" class="chat-form" novalidate>
+            <label for="chat-input" class="visually-hidden">Nachricht</label>
+            <input id="chat-input" type="text" maxlength="200" autocomplete="off" placeholder="Nachricht an alle">
+            <button type="submit" class="btn btn-ghost btn-sm">Senden</button>
+          </form>
+        </section>
+
+        <section class="panel score-panel" aria-labelledby="score-title">
+          <h2 id="score-title" class="panel-title">Rangliste</h2>
+          <ol id="scores" class="scores"></ol>
+        </section>
       </div>
     </section>
   </main>
+
+  <!-- Großansicht eines Champions -->
+  <dialog id="lightbox" class="lightbox" aria-labelledby="lb-name">
+    <div class="lb-frame">
+      <div class="lb-inner">
+        <div class="lb-art">
+          <picture id="lb-picture"></picture>
+        </div>
+        <div class="lb-body">
+          <div class="lb-text">
+            <h2 id="lb-name" class="lb-name"></h2>
+            <p id="lb-title" class="lb-title"></p>
+            <p id="lb-player" class="lb-player"></p>
+          </div>
+          <button id="lb-close" class="btn btn-ghost btn-sm lb-close" type="button">Schließen</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
 
 </body>
 </html>

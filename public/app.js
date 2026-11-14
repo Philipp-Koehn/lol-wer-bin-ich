@@ -42,7 +42,10 @@
   let guessSelection = null;
   let guessActive = -1;
   let guessMatches = [];
-  const sigs = { cards: '', log: '', scores: '', ranking: '' };
+  const sigs = { cards: '', log: '', scores: '', ranking: '', stagePortrait: '', stage: '' };
+  const LOG_FILTERS = ['all', 'questions', 'mine'];
+  let logFilter = safe(() => sessionStorage.getItem('lolwbi.logFilter'));
+  if (!LOG_FILTERS.includes(logFilter)) logFilter = 'all';
 
   const reducedMotion = () => safe(() => matchMedia('(prefers-reduced-motion: reduce)').matches, false);
   const finePointer = () => safe(() => matchMedia('(hover: hover) and (pointer: fine)').matches, false);
@@ -86,6 +89,40 @@
     img.addEventListener('error', () => img.replaceWith(h('span', { class: 'ph', 'aria-hidden': 'true' }, initials(champ.name))), { once: true });
     return img;
   }
+
+  // Großes Artwork (Ladebildschirm 308×560, Splash 1215×717) vom selben CDN wie die Icons.
+  // Die ID wird geprüft, bevor sie in eine URL wandert; fehlt das Bild, bleibt das Icon.
+  const ART = 'https://ddragon.leagueoflegends.com/cdn/img/champion';
+  const artId = (c) => (c && /^[A-Za-z0-9]{1,40}$/.test(c.id) ? c.id : null);
+  function champArt(champ) {
+    const id = artId(champ);
+    if (!id) return champImg(champ, 120);
+    const img = h('img', {
+      class: 'art', src: `${ART}/loading/${id}_0.jpg`, alt: '', width: 308, height: 560, loading: 'lazy', decoding: 'async',
+    });
+    img.addEventListener('error', () => img.replaceWith(champImg(champ, 120)), { once: true });
+    return img;
+  }
+
+  // Kleine Strich-Icons (DOM-erzeugt, kein innerHTML wegen Trusted Types).
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const ICONS = {
+    yes: 'M2.5 8.5l3.5 3.5 7.5-8',
+    no: 'M3.5 3.5l9 9m0-9l-9 9',
+    wait: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
+    done: 'M8 4.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z',
+  };
+  function icon(name) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', `ico ico-${name}`);
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', ICONS[name]);
+    svg.append(path);
+    return svg;
+  }
+  const yesNo = (v) => (v === 'yes' ? 'Ja' : 'Nein');
 
   function fmtTime(ts) {
     return new Date(ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -212,6 +249,9 @@
     prev = null;
     lastOwnVisible = null;
     for (const k of Object.keys(sigs)) sigs[k] = '';
+    if ($('lightbox').open) $('lightbox').close();
+    delete $('log').dataset.last;
+    $('log-jump').hidden = true;
     clearSession();
     showScreen('home');
     document.title = HOME_TITLE;
@@ -354,7 +394,7 @@
   }
   $('rules-btn').addEventListener('click', () => setRules($('rules-pop').hidden));
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('rules-pop').hidden) {
+    if (e.key === 'Escape' && !$('rules-pop').hidden && !$('lightbox').open) {
       const inside = $('rules-pop').contains(document.activeElement) || document.activeElement === $('rules-btn');
       setRules(false, inside);
     }
@@ -387,6 +427,115 @@
     const res = await act('chat:send', { text: input.value });
     if (res.ok) input.value = '';
   });
+
+  // ---------- Verlauf: Filter und Sprung zum neuesten Eintrag ----------
+  const nearBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+
+  function setLogFilter(f) {
+    if (!LOG_FILTERS.includes(f)) return;
+    logFilter = f;
+    safe(() => sessionStorage.setItem('lolwbi.logFilter', f));
+    syncFilterButtons();
+    sigs.log = '';
+    if (state && state.phase !== 'lobby') renderLog(true);
+  }
+  function syncFilterButtons() {
+    document.querySelectorAll('.log-filter .seg').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.filter === logFilter)));
+  }
+  document.querySelectorAll('.log-filter .seg').forEach((b) => b.addEventListener('click', () => setLogFilter(b.dataset.filter)));
+  syncFilterButtons();
+
+  $('log').addEventListener('scroll', () => { if (nearBottom($('log'))) $('log-jump').hidden = true; }, { passive: true });
+  $('log-jump').addEventListener('click', () => {
+    const log = $('log');
+    // Fokus erst in den Verlauf, dann den Knopf ausblenden: so geht er nicht verloren.
+    log.focus({ preventScroll: true });
+    log.scrollTo({ top: log.scrollHeight, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    $('log-jump').hidden = true;
+  });
+
+  // ---------- Großansicht eines Champions ----------
+  const lightbox = $('lightbox');
+  let lightboxFor = null; // Spieler-ID der geöffneten Karte (für die Fokus-Rückgabe)
+  let lightboxTimer = 0;
+
+  function openLightbox(pid) {
+    const p = state && byId(pid);
+    if (!p || !p.champion || typeof lightbox.showModal !== 'function') return;
+    const c = p.champion;
+    const id = artId(c);
+    const pic = $('lb-picture');
+    const img = h('img', { alt: `Artwork von ${c.name}`, width: 308, height: 560, decoding: 'async' });
+    const fallback = () => {
+      pic.replaceChildren(h('img', { class: 'is-icon is-loaded', src: c.image, alt: `Bild von ${c.name}`, width: 120, height: 120 }));
+    };
+    img.addEventListener('load', () => img.classList.add('is-loaded'), { once: true });
+    img.addEventListener('error', fallback, { once: true });
+    // Erst einhängen, dann src setzen: sonst lädt der Browser auch das Bild, das <source> ersetzt.
+    pic.replaceChildren(...(id ? [h('source', { media: '(min-width: 601px)', srcset: `${ART}/splash/${id}_0.jpg` })] : []), img);
+    img.src = id ? `${ART}/loading/${id}_0.jpg` : c.image;
+
+    $('lb-name').textContent = c.name;
+    $('lb-title').textContent = c.title || '';
+    $('lb-title').hidden = !c.title;
+    const status = [p.placement ? `Platz ${p.placement}` : null, p.isYou ? 'Dein Champion' : null].filter(Boolean);
+    $('lb-player').replaceChildren(
+      p.isYou ? h('span', null, status.join(', ')) : h('span', null, 'Champion von ', h('bdi', null, p.name), p.placement ? `, Platz ${p.placement}` : ''));
+
+    clearTimeout(lightboxTimer);
+    lightbox.classList.remove('is-closing');
+    lightboxFor = pid;
+    if (!lightbox.open) lightbox.showModal();
+    $('lb-close').focus();
+  }
+
+  function closeLightbox() {
+    if (!lightbox.open || lightbox.classList.contains('is-closing')) return;
+    if (reducedMotion()) { lightbox.close(); return; }
+    // Kurzer, schnellerer Ausgang als Eingang; danach wirklich schließen.
+    lightbox.classList.add('is-closing');
+    lightboxTimer = setTimeout(() => lightbox.close(), 140);
+  }
+
+  lightbox.addEventListener('cancel', (e) => { e.preventDefault(); closeLightbox(); });
+  lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
+  lightbox.addEventListener('close', () => {
+    clearTimeout(lightboxTimer);
+    lightbox.classList.remove('is-closing');
+    $('lb-picture').replaceChildren();
+    // Fokus zurück auf die Karte; wurde sie inzwischen neu gerendert, auf ihre Nachfolgerin.
+    const sel = lightboxFor && `li.card[data-player-id="${CSS.escape(lightboxFor)}"] .card-zoom`;
+    const target = (sel && document.querySelector(sel)) || $('board-title');
+    lightboxFor = null;
+    if (isShown($('screen-game'))) target.focus({ preventScroll: true });
+  });
+  $('lb-close').addEventListener('click', closeLightbox);
+  $('cards').addEventListener('click', (e) => {
+    const btn = e.target.closest('.card-zoom');
+    if (btn) openLightbox(btn.closest('li.card').dataset.playerId);
+  });
+
+  // Handy/Tablet: Sind Ja/Nein aus dem Bild gescrollt (z. B. beim Ansehen der Karten), docken
+  // dieselben Knöpfe unten an. Der Kasten behält seine Höhe, daher springt nichts.
+  if ('IntersectionObserver' in window) {
+    const box = $('answer-box');
+    let boxVisible = true;
+    const syncDock = () => {
+      const narrow = safe(() => matchMedia('(max-width: 860px)').matches, false);
+      const dock = narrow && !boxVisible && !box.hidden && isShown($('screen-game'));
+      box.classList.toggle('is-docked', dock);
+      document.body.classList.toggle('has-dock', dock);
+    };
+    new IntersectionObserver(([e]) => { boxVisible = e.isIntersecting; syncDock(); }).observe(box);
+    new MutationObserver(syncDock).observe(box, { attributes: true, attributeFilter: ['hidden'] });
+    window.addEventListener('resize', syncDock, { passive: true });
+  }
+
+  // Höhe der Kopfzeile für die mitlaufende Seitenleiste.
+  if ('ResizeObserver' in window) {
+    const bar = document.querySelector('.game-bar');
+    new ResizeObserver(() => document.documentElement.style.setProperty('--bar-h', `${Math.ceil(bar.offsetHeight)}px`)).observe(bar);
+  }
 
   // ---------- Raten mit Autovervollständigung ----------
   const norm = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -628,7 +777,7 @@
 
     panel.classList.toggle('is-active', myTurn);
     if (myTurn && !lastTurnWasMine && prev) replay(panel, 'turn-flash');
-    const show = { ask: false, answer: false, progress: false, guess: false, end: false };
+    const show = { ask: false, answer: false, guess: false, end: false };
     let title = '';
     let sub = '';
 
@@ -640,8 +789,7 @@
     } else if (myTurn) {
       if (q) {
         title = 'Warte auf die Antworten';
-        sub = `Deine Frage: „${q.text}“`;
-        show.progress = true;
+        sub = 'Die anderen schauen sich deinen Champion an und antworten.';
       } else {
         title = 'Du bist dran';
         sub = 'Stell eine Ja/Nein-Frage oder rate deinen Champion.';
@@ -652,15 +800,19 @@
     } else {
       const askerName = current ? current.name : '';
       if (q && q.askerId !== self.id) {
-        title = `${iso(byId(q.askerId) ? byId(q.askerId).name : askerName)} fragt`;
-        $('answer-question').textContent = q.text;
+        const asker = byId(q.askerId);
+        const who = iso(asker ? asker.name : askerName);
         if (q.yourAnswer) {
-          sub = `Du hast mit ${q.yourAnswer === 'yes' ? 'Ja' : 'Nein'} geantwortet.`;
+          title = `${who} fragt`;
+          sub = `Du hast mit ${yesNo(q.yourAnswer)} geantwortet. Warte auf die anderen.`;
         } else if (q.required.includes(self.id)) {
+          title = `${who} fragt dich`;
           show.answer = true;
-          sub = 'Schau dir die Karte an und antworte ehrlich.';
+          sub = 'Schau dir den Champion an und antworte ehrlich.';
+        } else {
+          title = `${who} fragt`;
+          sub = 'Warte, bis alle geantwortet haben.';
         }
-        show.progress = true;
       } else if (current) {
         title = `${iso(current.name)} ist dran`;
         sub = 'Warte auf die nächste Frage.';
@@ -678,12 +830,11 @@
       if (prev) replay(titleEl, 'is-changed');
     }
     $('turn-sub').textContent = sub;
+    $('turn-sub').hidden = !sub;
     $('ask-form').hidden = !show.ask;
-    $('answer-box').hidden = !show.answer;
     $('guess-box').hidden = !show.guess;
     $('round-end').hidden = !show.end;
-    $('answer-progress').hidden = !show.progress;
-    if (show.progress) renderProgress(q);
+    renderStage(self, q, show.answer);
     if (!show.guess) closeGuessList();
 
     // Fokus nie im Nichts verlieren: Wurde das fokussierte Element ausgeblendet (z. B. nach
@@ -701,21 +852,114 @@
     renderScores();
   }
 
+  // Letzte entschiedene Frage dieser Runde, solange danach nicht geraten wurde.
+  function lastResolvedQuestion() {
+    const roundStart = new RegExp(`^Runde ${state.roundNumber} beginnt\\. `);
+    for (let i = state.history.length - 1; i >= 0; i--) {
+      const e = state.history[i];
+      if (e.type === 'guess' || (e.type === 'system' && roundStart.test(e.text))) return null;
+      if (e.type === 'question') return e.status === 'yes' || e.status === 'no' ? e : null;
+    }
+    return null;
+  }
+
+  // Frage-Bühne: die offene Frage groß mit Porträt des Fragenden, sonst das Ergebnis der letzten.
+  function renderStage(self, q, showAnswer) {
+    const stage = $('q-stage');
+    let mode = null;
+    let entry = null;
+    if (state.phase === 'playing') {
+      if (q) { mode = 'open'; entry = state.history.find((e) => e.id === q.id) || { id: q.id, text: q.text, ts: Date.now() }; }
+      else { entry = lastResolvedQuestion(); if (entry) mode = 'result'; }
+    }
+    stage.hidden = !mode;
+    $('answer-box').hidden = !(mode && showAnswer);
+    $('answer-progress').hidden = mode !== 'open';
+    $('q-result').hidden = mode !== 'result';
+    if (!mode) { sigs.stage = ''; return; }
+
+    const askerId = q ? q.askerId : entry.askerId;
+    const asker = byId(askerId);
+    const mine = askerId === self.id;
+    const verdict = mode === 'result' ? entry.status : 'open';
+    stage.classList.remove('is-open', 'is-yes', 'is-no');
+    stage.classList.add(`is-${verdict}`);
+    const key = `${mode}:${entry.id}`;
+    if (key !== sigs.stage) {
+      if (sigs.stage && prev) replay(stage, 'is-changed');
+      sigs.stage = key;
+    }
+
+    // Porträt nur neu bauen, wenn sich Fragender oder Champion ändern (kein Flackern).
+    const champ = asker && asker.champion;
+    const pSig = `${askerId}:${champ ? champ.id : ''}`;
+    if (sigs.stagePortrait !== pSig) {
+      sigs.stagePortrait = pSig;
+      const art = champ ? champImg(champ, 104) : h('span', { class: 'sealed', 'aria-hidden': 'true' }, h('span', null, '?'));
+      $('q-portrait').replaceChildren(
+        h('span', { class: 'q-frame', 'aria-hidden': 'true' }, art),
+        h('span', { class: 'q-caption' },
+          champ ? h('span', { class: 'visually-hidden' }, mine ? 'Dein Champion: ' : `Champion von ${asker.name}: `) : null,
+          champ ? champ.name : (mine ? 'Du' : '?')));
+    }
+
+    const count = asker && asker.questions ? h('span', { class: 'q-count' }, `${asker.questions}. Frage`) : null;
+    const askerName = asker ? asker.name : (entry.askerName || '?');
+    const label = mode === 'open'
+      ? (mine ? [h('strong', null, 'Deine Frage')] : ['Frage von ', h('strong', null, h('bdi', null, askerName))])
+      : (mine ? [h('strong', null, 'Deine letzte Frage')] : ['Letzte Frage von ', h('strong', null, h('bdi', null, askerName))]);
+    $('q-meta').replaceChildren(h('span', null, ...label), count,
+      h('time', { datetime: new Date(entry.ts).toISOString() }, fmtTime(entry.ts)));
+    $('answer-question').textContent = q ? q.text : entry.text;
+    $('answer-question').classList.toggle('is-long', (q ? q.text : entry.text).length > 80);
+    $('dock-q').textContent = q ? q.text : '';
+
+    if (mode === 'open') renderProgress(q);
+    else renderResult(entry);
+  }
+
   function renderProgress(q) {
     const done = new Set(q.answeredIds);
-    const pills = q.required.map((id) => {
-      const p = byId(id);
-      const answered = done.has(id);
-      const pill = h('span', { class: `pill${answered ? ' done' : ''}` },
-        h('bdi', null, p ? p.name : '?'),
-        h('span', { class: 'mark', 'aria-hidden': 'true' }, answered ? '✓' : '…'),
-        h('span', { class: 'visually-hidden' }, answered ? ' hat geantwortet' : ' antwortet noch'));
-      if (answered) animateIfFresh(pill, `pill:${q.id}:${id}`, 'is-new');
-      return pill;
-    });
-    const count = q.required.filter((id) => done.has(id)).length;
+    const answered = q.required.filter((id) => done.has(id));
+    const missing = q.required.filter((id) => !done.has(id));
+    const nameOf = (id) => { const p = byId(id); return p ? p.name : '?'; };
+    const pill = (id, isDone) => {
+      const el = h('li', { class: `pill${isDone ? ' done' : ''}${id === state.youId ? ' is-you' : ''}` },
+        icon(isDone ? 'done' : 'wait'), h('bdi', null, nameOf(id)), id === state.youId ? h('span', { class: 'you' }, ' (du)') : null);
+      if (isDone) animateIfFresh(el, `pill:${q.id}:${id}`, 'is-new');
+      return el;
+    };
+    const group = (label, ids, isDone) => (ids.length
+      ? h('div', { class: `prog-group${isDone ? ' is-done' : ''}` },
+        h('span', { class: 'prog-label' }, `${label} (${ids.length})`),
+        h('ul', { class: 'pills', 'aria-label': label }, ...ids.map((id) => pill(id, isDone))))
+      : null);
+    const bar = h('span', { class: 'prog-bar', 'aria-hidden': 'true' }, ...q.required.map((id, i) => {
+      const seg = h('span', { class: i < answered.length ? 'on' : null });
+      if (i === answered.length - 1 && answered.length) animateIfFresh(seg, `pill:${q.id}:${answered[answered.length - 1]}`, 'is-new');
+      return seg;
+    }));
     $('answer-progress').replaceChildren(
-      h('span', null, `Antworten ${count} von ${q.required.length}:`), ...pills);
+      h('p', { class: 'prog-head' },
+        h('span', { class: 'prog-count' }, `Antworten ${answered.length} von ${q.required.length}`),
+        q.yourAnswer ? h('span', { class: `prog-you ${q.yourAnswer}` }, icon(q.yourAnswer), `Du: ${yesNo(q.yourAnswer)}`) : null),
+      bar,
+      h('div', { class: 'prog-groups' }, group('Geantwortet', answered, true), group('Fehlt noch', missing, false)));
+  }
+
+  function answersList(answers) {
+    return h('ul', { class: 'answers', 'aria-label': 'Antworten' }, ...answers.map((a) =>
+      h('li', { class: `a-${a.answer}` }, icon(a.answer), h('span', null, h('bdi', null, a.name), `: ${yesNo(a.answer)}`))));
+  }
+
+  function renderResult(e) {
+    const answers = e.answers || [];
+    const yes = typeof e.yes === 'number' ? e.yes : answers.filter((a) => a.answer === 'yes').length;
+    const no = typeof e.no === 'number' ? e.no : answers.length - yes;
+    $('q-result').replaceChildren(
+      h('p', { class: `q-verdict ${e.status}` }, icon(e.status), 'Ergebnis: ', h('strong', null, yesNo(e.status))),
+      h('span', { class: 'q-tally' }, `${yes} Ja, ${no} Nein`),
+      answers.length ? answersList(answers) : null);
   }
 
   function renderRoundEnd(self) {
@@ -746,6 +990,12 @@
     lastOwnVisible = self.playing ? ownVisible : null;
 
     const playing = state.players.filter((p) => p.playing);
+    const list = $('cards');
+    // Größenstufe nach Spielerzahl: wenige Spieler bekommen große Karten, zehn passen noch in zwei Reihen.
+    const n = Math.max(playing.length, 1);
+    list.dataset.size = n <= 4 ? 'l' : n <= 6 ? 'm' : 's';
+    list.style.setProperty('--n', String(n));
+
     const sig = JSON.stringify([state.phase, state.roundNumber, state.turn.currentId, playing.map((p) =>
       [p.id, p.name, p.connected, p.isHost, p.placement, p.questions, p.wrongGuesses, p.champion && p.champion.id])]);
     if (sig === sigs.cards) return;
@@ -757,9 +1007,10 @@
       if (isTurn) classes.push('is-turn');
       if (p.isYou) classes.push('is-you');
       if (!p.connected) classes.push('is-off');
+      if (p.placement) classes.push('is-placed');
 
       const portrait = h('div', { class: 'portrait' });
-      if (p.champion) portrait.append(champImg(p.champion, 120));
+      if (p.champion) portrait.append(champArt(p.champion));
       else portrait.append(h('div', { class: 'sealed', 'aria-hidden': 'true' }, h('span', null, '?')));
       if (isTurn) portrait.append(h('span', { class: 'badge badge-turn', 'aria-hidden': 'true' }, 'Am Zug'));
       if (p.placement) portrait.append(h('span', { class: 'badge badge-place', 'aria-hidden': 'true' }, `#${p.placement}`));
@@ -771,66 +1022,114 @@
         p.champion && p.champion.title ? h('span', { class: 'champ-title' }, p.champion.title) : null,
         h('span', { class: 'card-player' }, nameEl(p), ...playerTags(p)),
         h('span', { class: 'card-stats' },
-          `${plural(p.questions, 'Frage', 'Fragen')}${p.wrongGuesses ? `, ${plural(p.wrongGuesses, 'Fehltipp', 'Fehltipps')}` : ''}`),
+          h('span', { class: 'stat' }, h('span', { class: 'num' }, String(p.questions)), p.questions === 1 ? ' Frage' : ' Fragen'),
+          p.wrongGuesses ? h('span', { class: 'stat' }, h('span', { class: 'num' }, String(p.wrongGuesses)), p.wrongGuesses === 1 ? ' Fehltipp' : ' Fehltipps') : null),
         status ? h('span', { class: 'visually-hidden' }, `, ${status}`) : null);
 
+      const zoom = p.champion
+        ? h('button', { type: 'button', class: 'card-zoom', 'aria-haspopup': 'dialog', 'aria-label': `${p.champion.name} groß anzeigen` })
+        : null;
       const li = h('li', {
         class: classes.join(' '),
         'data-player-id': p.id,
         'data-champion-id': p.champion ? p.champion.id : null,
-      }, h('div', { class: 'card-inner' }, portrait, body));
+      }, h('div', { class: 'card-inner' }, portrait, body), zoom);
       animateIfFresh(li, `deal:${state.roundNumber}`, 'is-dealt', Math.min(i, 9) * 70, '--deal-t');
       if (isTurn) animateIfFresh(li, `turn:${state.roundNumber}:${p.id}`, 'turn-in');
       if (p.isYou) animateIfFresh(li, `reveal:${state.roundNumber}:${p.id}`, 'reveal');
       return li;
     });
-    $('cards').replaceChildren(...cards);
+
+    // Fokus auf einer Karte über das Neu-Rendern retten (z. B. beim Zugwechsel).
+    const active = document.activeElement;
+    const focusPid = active && active.classList.contains('card-zoom') && list.contains(active)
+      ? active.closest('li.card').dataset.playerId : null;
+    list.replaceChildren(...cards);
+    if (focusPid) {
+      const again = list.querySelector(`li.card[data-player-id="${CSS.escape(focusPid)}"] .card-zoom`);
+      (again || $('board-title')).focus({ preventScroll: true });
+    }
   }
 
   const verdictLabel = { yes: 'Ja', no: 'Nein', pending: 'offen', abgebrochen: 'abgebrochen', 'zurückgezogen': 'zurückgezogen' };
 
-  function renderLog() {
+  const verdictIcon = { yes: 'yes', no: 'no', pending: 'wait' };
+  const emptyLog = {
+    all: 'Noch nichts passiert.',
+    questions: 'Noch keine Fragen gestellt.',
+    mine: 'Du hast noch keine Frage gestellt. Deine Fragen und Tipps erscheinen hier.',
+  };
+
+  function renderLog(forceBottom = false) {
     const log = $('log');
-    const sig = JSON.stringify(state.history.map((e) => [e.id, e.status, e.answeredIds && e.answeredIds.length]));
+    const selfId = state.youId;
+    const q = state.turn.question;
+    const isMine = (e) => (e.type === 'question' && e.askerId === selfId) || (e.type === 'guess' && e.playerId === selfId);
+    const isQuestionish = (e) => e.type === 'question' || e.type === 'guess';
+    const questions = state.history.filter((e) => e.type === 'question');
+    $('count-questions').textContent = String(questions.length);
+    $('count-mine').textContent = String(questions.filter((e) => e.askerId === selfId).length);
+
+    const sig = JSON.stringify([logFilter, selfId, q && q.required.length,
+      state.history.map((e) => [e.id, e.status, e.answeredIds && e.answeredIds.length])]);
     if (sig === sigs.log) return;
     sigs.log = sig;
-    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
-    const items = state.history.map((e) => {
+
+    const shown = state.history.filter((e) => (logFilter === 'all' ? true : logFilter === 'mine' ? isMine(e) : isQuestionish(e)));
+    const hadContent = !!log.dataset.last;
+    const atBottom = nearBottom(log);
+    const items = shown.map((e) => {
       const time = h('time', { datetime: new Date(e.ts).toISOString() }, fmtTime(e.ts));
+      const mine = isMine(e);
+      const youTag = mine ? h('span', { class: 'tag tag-you' }, 'du') : null;
       let li;
       if (e.type === 'system') {
         li = h('li', { class: 'is-system' }, h('span', { class: 'text' }, e.text), ' ', time);
       } else if (e.type === 'chat') {
-        li = h('li', null, h('div', { class: 'meta' }, h('strong', null, h('bdi', null, e.name)), time), h('div', { class: 'text' }, e.text));
+        li = h('li', { class: 'is-chat' },
+          h('div', { class: 'meta' }, h('strong', null, h('bdi', null, e.name)), e.playerId === selfId ? h('span', { class: 'tag tag-you' }, 'du') : null, time),
+          h('div', { class: 'text' }, e.text));
       } else if (e.type === 'guess') {
-        li = h('li', { class: e.correct ? 'is-correct' : 'is-no' },
-          h('div', { class: 'meta' }, h('strong', null, h('bdi', null, e.name)),
-            h('span', { class: `verdict ${e.correct ? 'correct' : 'no'}` }, e.correct ? 'richtig' : 'falsch'), time),
-          h('div', { class: 'text' }, `tippt auf ${e.championName}`));
+        li = h('li', { class: `is-guess ${e.correct ? 'is-correct' : 'is-no'}${mine ? ' is-mine' : ''}` },
+          h('div', { class: 'meta' }, h('strong', null, h('bdi', null, e.name)), youTag, time),
+          h('div', { class: 'q-foot' },
+            h('span', { class: `verdict ${e.correct ? 'correct' : 'no'}` }, icon(e.correct ? 'yes' : 'no'), e.correct ? 'richtig' : 'falsch'),
+            h('span', { class: 'text' }, `tippt auf ${e.championName}`)));
       } else {
         // Frage
         const status = e.status;
-        const cls = status === 'yes' ? 'is-yes' : status === 'no' ? 'is-no' : null;
         const vClass = status === 'yes' ? 'yes' : status === 'no' ? 'no' : status === 'pending' ? 'pending' : 'other';
+        const isOpen = status === 'pending' && q && q.id === e.id;
+        const verdict = h('span', { class: `verdict ${vClass}` },
+          verdictIcon[status] ? icon(verdictIcon[status]) : null,
+          h('span', { class: 'visually-hidden' }, 'Ergebnis: '), verdictLabel[status] || status);
+        animateIfFresh(verdict, `verdict:${e.id}`, 'is-new');
         let detail = null;
         if (e.answers && e.answers.length) {
-          detail = h('div', { class: 'answers' }, ...e.answers.flatMap((a, i) =>
-            [i ? ', ' : null, h('bdi', null, a.name), `: ${a.answer === 'yes' ? 'Ja' : 'Nein'}`]));
+          detail = answersList(e.answers);
         } else if (status === 'pending') {
           const n = (e.answeredIds || []).length;
-          detail = h('div', { class: 'answers' }, n === 1 ? '1 Antwort bisher' : `${n} Antworten bisher`);
+          detail = h('span', { class: 'pending-count' }, isOpen ? `${n} von ${q.required.length} geantwortet` : `${plural(n, 'Antwort', 'Antworten')} bisher`);
         }
-        const verdict = h('span', { class: `verdict ${vClass}` }, verdictLabel[status] || status);
-        animateIfFresh(verdict, `verdict:${e.id}`, 'is-new');
-        li = h('li', { class: cls },
-          h('div', { class: 'meta' }, h('strong', null, h('bdi', null, e.askerName)), verdict, time),
-          h('div', { class: 'text q-text' }, e.text), detail);
+        li = h('li', { class: `q-entry is-${vClass}${mine ? ' is-mine' : ''}${isOpen ? ' is-open' : ''}` },
+          h('div', { class: 'meta' }, h('strong', null, h('bdi', null, e.askerName)), youTag, time),
+          h('p', { class: 'text q-text' }, e.text),
+          h('div', { class: 'q-foot' }, verdict, detail));
       }
       animateIfFresh(li, `log:${e.id}`, 'is-new');
       return li;
     });
-    log.replaceChildren(...(items.length ? items : [h('li', { class: 'is-system log-empty' }, 'Noch nichts passiert.')]));
-    if (atBottom) log.scrollTop = log.scrollHeight;
+    log.replaceChildren(...(items.length ? items : [h('li', { class: 'is-system log-empty' }, emptyLog[logFilter])]));
+
+    // Neuester Eintrag: mitscrollen, wenn man unten war; sonst den Sprungknopf zeigen.
+    const lastId = String(shown.length ? shown[shown.length - 1].id : 0);
+    if (forceBottom || atBottom || !hadContent) {
+      log.scrollTop = log.scrollHeight;
+      $('log-jump').hidden = true;
+    } else if (lastId !== log.dataset.last && !nearBottom(log)) {
+      $('log-jump').hidden = false;
+    }
+    log.dataset.last = lastId;
   }
 
   function renderScores() {
