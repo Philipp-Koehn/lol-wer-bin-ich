@@ -16,7 +16,10 @@
   <a class="skip-link" href="#main">Zum Inhalt springen</a>
 
   <div id="conn-banner" class="conn-banner" role="status" hidden>Verbindung unterbrochen. Verbinde neu …</div>
-  <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+  <!-- Sichtbare Meldungen; vorgelesen wird über die beiden Live-Regionen darunter. -->
+  <div id="toasts" class="toasts" aria-hidden="true"></div>
+  <div id="sr-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="sr-alert" class="visually-hidden" role="alert" aria-live="assertive" aria-atomic="true"></div>
 
   <main id="main">
     <!-- ============ Startseite ============ -->
@@ -42,7 +45,7 @@
       <div class="home-forms">
         <div class="field">
           <label for="name-input">Dein Name</label>
-          <input id="name-input" type="text" maxlength="20" autocomplete="nickname" spellcheck="false" placeholder="z. B. Faker">
+          <input id="name-input" type="text" maxlength="20" autocomplete="nickname" spellcheck="false" placeholder="z. B. Faker" aria-describedby="home-error">
         </div>
 
         <form id="create-form" class="home-card" novalidate>
@@ -55,7 +58,7 @@
           <h2>Raum beitreten</h2>
           <div class="field">
             <label for="code-input">Raumcode</label>
-            <input id="code-input" type="text" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCDE" inputmode="text">
+            <input id="code-input" type="text" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCDE" inputmode="text" aria-describedby="home-error">
           </div>
           <button type="submit" class="btn btn-outline">Beitreten</button>
         </form>
@@ -109,7 +112,7 @@
           <button id="game-leave" class="btn btn-ghost btn-sm" type="button">Verlassen</button>
         </div>
       </header>
-      <div id="rules-pop" class="rules-pop" hidden>
+      <div id="rules-pop" class="rules-pop" role="region" aria-label="Regeln" hidden>
         <p data-rule="answers"></p>
         <p data-rule="turn"></p>
         <p data-rule="scoring"></p>
@@ -117,8 +120,8 @@
 
       <div class="game-layout">
         <div class="game-main">
-          <section id="turn-panel" class="turn-panel" aria-live="polite" aria-labelledby="turn-title">
-            <h2 id="turn-title" class="turn-title"></h2>
+          <section id="turn-panel" class="turn-panel" aria-labelledby="turn-title">
+            <h2 id="turn-title" class="turn-title" tabindex="-1"></h2>
             <p id="turn-sub" class="turn-sub"></p>
 
             <!-- Fragender -->
@@ -169,7 +172,7 @@
         <aside class="game-side">
           <section class="panel log-panel" aria-labelledby="log-title">
             <h2 id="log-title" class="panel-title">Verlauf</h2>
-            <ol id="log" class="log" aria-live="off"></ol>
+            <ol id="log" class="log" tabindex="0" aria-labelledby="log-title"></ol>
             <form id="chat-form" class="chat-form" novalidate>
               <label for="chat-input" class="visually-hidden">Nachricht</label>
               <input id="chat-input" type="text" maxlength="200" autocomplete="off" placeholder="Nachricht an alle">

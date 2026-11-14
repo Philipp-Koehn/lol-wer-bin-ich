@@ -175,6 +175,7 @@ def main():
         ana.page.goto(BASE)
         ana.page.wait_for_load_state("networkidle")
         expect(ana.page.locator("#data-note")).to_contain_text("Champions")
+        ana.page.wait_for_timeout(600)  # Einblend-Staffelung der Startseite abwarten
         shot(ana, "01-start-desktop.png")
         ana.page.fill("#name-input", ana.name)
         ana.page.click("#create-form button")
@@ -189,6 +190,10 @@ def main():
             p.page.goto(f"{BASE}/?raum={code}")
             p.page.wait_for_load_state("networkidle")
             check(p.page.input_value("#code-input") == code, f"{p.name}: Code aus Einladungslink vorausgefüllt")
+            if p is cleo:
+                p.page.wait_for_timeout(600)  # Einblend-Staffelung der Startseite abwarten
+                shot(cleo, "01-start-mobile.png")
+                no_horizontal_scroll(cleo, "Startseite mobil")
             p.page.fill("#name-input", p.name)
             p.page.click("#join-form button")
             expect(p.page.locator("#screen-lobby")).to_be_visible()

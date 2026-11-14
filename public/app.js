@@ -31,12 +31,17 @@
   let champions = [];
   const champById = new Map();
   let state = null;
+  let prev = null; // zuletzt gerenderter Zustand (für Animationen und Ansagen)
   let session = loadSession();
   let lastOwnVisible = null;
   let lastTurnWasMine = false;
   let guessSelection = null;
   let guessActive = -1;
   let guessMatches = [];
+  const sigs = { cards: '', log: '', scores: '', ranking: '' };
+
+  const reducedMotion = () => safe(() => matchMedia('(prefers-reduced-motion: reduce)').matches, false);
+  const finePointer = () => safe(() => matchMedia('(hover: hover) and (pointer: fine)').matches, false);
 
   // ---------- DOM-Helfer ----------
   function h(tag, attrs, ...children) {
@@ -56,15 +61,25 @@
     return el;
   }
 
+  // Fremde Namen in zusammengesetzten Sätzen isolieren (z. B. arabische Namen vor „fragt“).
+  const iso = (s) => `⁨${s}⁩`;
+
+  // Spielername als eigenes, bidi-isoliertes Element; „(du)“ abgesetzt.
+  function nameEl(p, cls = 'player-name') {
+    return h('span', { class: cls, 'data-testid': cls === 'player-name' ? 'player-name' : null },
+      h('bdi', null, p.name), p.isYou ? h('span', { class: 'you' }, ' (du)') : null);
+  }
+
   function initials(name) {
     return (name || '?').replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2) || '?';
   }
 
-  function champImg(champ, size) {
+  // alt="" wenn der Name ohnehin als Text daneben steht (sonst liest der Screenreader doppelt).
+  function champImg(champ, size, alt = '') {
     const img = h('img', {
-      src: champ.image, alt: champ.name, width: size, height: size, loading: 'lazy', decoding: 'async',
+      src: champ.image, alt, width: size, height: size, loading: 'lazy', decoding: 'async',
     });
-    img.addEventListener('error', () => img.replaceWith(h('span', { class: 'ph', 'aria-label': champ.name }, initials(champ.name))), { once: true });
+    img.addEventListener('error', () => img.replaceWith(h('span', { class: 'ph', 'aria-hidden': 'true' }, initials(champ.name))), { once: true });
     return img;
   }
 
@@ -76,10 +91,33 @@
     return `${n} ${n === 1 ? one : many}`;
   }
 
+  // ---------- Ansagen für Screenreader ----------
+  // Kurz hintereinander eintreffende Meldungen werden gesammelt statt sich zu überschreiben.
+  const srQueue = { 'sr-status': [], 'sr-alert': [] };
+  const srTimer = {};
+  function announce(message, assertive = false) {
+    if (!message) return;
+    const id = assertive ? 'sr-alert' : 'sr-status';
+    srQueue[id].push(message);
+    // Leeren und neu setzen, damit auch eine gleichlautende Meldung erneut vorgelesen wird.
+    $(id).textContent = '';
+    clearTimeout(srTimer[id]);
+    srTimer[id] = setTimeout(() => {
+      $(id).textContent = srQueue[id].join(' ');
+      srQueue[id] = [];
+    }, 80);
+  }
+
   function toast(message, isError = false) {
-    const el = h('div', { class: `toast${isError ? ' is-error' : ''}`, role: isError ? 'alert' : 'status' }, message);
-    $('toasts').append(el);
-    setTimeout(() => el.remove(), isError ? 5000 : 3200);
+    const box = $('toasts');
+    const el = h('div', { class: `toast${isError ? ' is-error' : ''}` }, message);
+    box.append(el);
+    while (box.children.length > 3) box.firstElementChild.remove();
+    announce(message, isError);
+    setTimeout(() => {
+      el.classList.add('is-leaving');
+      setTimeout(() => el.remove(), 180);
+    }, isError ? 5000 : 3200);
   }
 
   function showScreen(name) {
@@ -94,6 +132,35 @@
         }
       }
     }
+  }
+
+  const isShown = (el) => !!el && el.isConnected && (el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null);
+
+  // Klasse neu auslösen, damit eine CSS-Animation erneut abläuft.
+  function replay(el, cls) {
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+  }
+
+  // ---------- Animationen über Neu-Renderings hinweg ----------
+  // Listen werden bei jedem Zustand neu gebaut. Damit eine laufende Animation dabei nicht
+  // neu startet oder abbricht, merken wir uns den Startzeitpunkt pro Schlüssel und setzen
+  // auf neu erzeugten Elementen eine negative Verzögerung (--t): Sie laufen nahtlos weiter.
+  const fresh = new Map();
+  const FRESH_MS = 1600;
+  function markFresh(key) {
+    const now = performance.now();
+    for (const [k, t] of fresh) if (now - t > FRESH_MS) fresh.delete(k);
+    fresh.set(key, now);
+  }
+  function animateIfFresh(el, key, cls, delay = 0) {
+    const t = fresh.get(key);
+    if (t === undefined) return;
+    const age = performance.now() - t;
+    if (age > FRESH_MS) { fresh.delete(key); return; }
+    el.classList.add(cls);
+    el.style.setProperty('--t', `${Math.round(delay - age)}ms`);
   }
 
   // ---------- Netzwerk ----------
@@ -114,6 +181,18 @@
     return res;
   }
 
+  // Sperrt Knöpfe, solange eine Aktion unterwegs ist (kein Doppelklick, kein doppeltes Antworten).
+  // Bewusst aria-disabled statt disabled: ein deaktivierter Knopf verliert sonst den Tastaturfokus.
+  async function withBusy(buttons, fn) {
+    if (buttons.some((b) => b.dataset.busy)) return null;
+    buttons.forEach((b) => { b.dataset.busy = '1'; b.setAttribute('aria-disabled', 'true'); });
+    try {
+      return await fn();
+    } finally {
+      buttons.forEach((b) => { delete b.dataset.busy; b.removeAttribute('aria-disabled'); });
+    }
+  }
+
   function adoptSession(res) {
     session = { code: res.code, playerId: res.playerId, token: res.token, name: res.name };
     saveSession(session);
@@ -126,7 +205,9 @@
   function dropSession() {
     session = null;
     state = null;
+    prev = null;
     lastOwnVisible = null;
+    for (const k of Object.keys(sigs)) sigs[k] = '';
     clearSession();
     showScreen('home');
   }
@@ -169,11 +250,19 @@
   }
 
   // ---------- Startseite ----------
+  function homeError(message, field) {
+    $('home-error').textContent = message;
+    for (const id of ['name-input', 'code-input']) {
+      if (id === field) $(id).setAttribute('aria-invalid', 'true');
+      else $(id).removeAttribute('aria-invalid');
+    }
+    if (field) $(field).focus();
+  }
+
   function readName() {
     const name = $('name-input').value.trim();
     if (!name) {
-      $('home-error').textContent = 'Bitte gib zuerst deinen Namen ein.';
-      $('name-input').focus();
+      homeError('Bitte gib zuerst deinen Namen ein.', 'name-input');
       return null;
     }
     safe(() => localStorage.setItem(NAME_KEY, name));
@@ -182,33 +271,38 @@
 
   $('create-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    $('home-error').textContent = '';
+    homeError('');
     const name = readName();
     if (!name) return;
-    const res = await emit('room:create', { name });
-    if (!res.ok) { $('home-error').textContent = res.error; return; }
+    const btn = e.currentTarget.querySelector('button[type=submit]');
+    const res = await withBusy([btn], () => emit('room:create', { name }));
+    if (!res) return;
+    if (!res.ok) { homeError(res.error); return; }
     adoptSession(res);
   });
 
   $('join-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    $('home-error').textContent = '';
+    homeError('');
     const code = $('code-input').value.trim().toUpperCase();
     if (code.length !== 5) {
-      $('home-error').textContent = 'Der Raumcode hat 5 Zeichen.';
-      $('code-input').focus();
+      homeError('Der Raumcode hat 5 Zeichen.', 'code-input');
       return;
     }
     const name = readName();
     if (!name) return;
-    const res = await emit('room:join', { code, name });
-    if (!res.ok) { $('home-error').textContent = res.error; return; }
+    const btn = e.currentTarget.querySelector('button[type=submit]');
+    const res = await withBusy([btn], () => emit('room:join', { code, name }));
+    if (!res) return;
+    if (!res.ok) { homeError(res.error); return; }
     adoptSession(res);
   });
 
   $('code-input').addEventListener('input', (e) => {
     e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    e.target.removeAttribute('aria-invalid');
   });
+  $('name-input').addEventListener('input', (e) => e.target.removeAttribute('aria-invalid'));
 
   // ---------- Gemeinsame Aktionen ----------
   async function copyInvite() {
@@ -235,16 +329,23 @@
   $('lobby-leave').addEventListener('click', leave);
   $('game-leave').addEventListener('click', leave);
 
-  $('start-btn').addEventListener('click', () => act('game:start'));
-  $('next-round-btn').addEventListener('click', () => act('game:start'));
+  $('start-btn').addEventListener('click', () => withBusy([$('start-btn')], () => act('game:start')));
+  $('next-round-btn').addEventListener('click', () => withBusy([$('next-round-btn')], () => act('game:start')));
   $('restart-btn').addEventListener('click', () => {
     if (window.confirm('Runde neu starten? Die Punkte dieser Runde verfallen.')) act('game:restart');
   });
 
-  $('rules-btn').addEventListener('click', () => {
-    const pop = $('rules-pop');
-    pop.hidden = !pop.hidden;
-    $('rules-btn').setAttribute('aria-expanded', String(!pop.hidden));
+  function setRules(open, returnFocus = false) {
+    $('rules-pop').hidden = !open;
+    $('rules-btn').setAttribute('aria-expanded', String(open));
+    if (!open && returnFocus) $('rules-btn').focus();
+  }
+  $('rules-btn').addEventListener('click', () => setRules($('rules-pop').hidden));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('rules-pop').hidden) {
+      const inside = $('rules-pop').contains(document.activeElement) || document.activeElement === $('rules-btn');
+      setRules(false, inside);
+    }
   });
 
   // ---------- Fragen, Antworten, Chat ----------
@@ -253,17 +354,19 @@
     const input = $('ask-input');
     const text = input.value.trim();
     if (text.length < 3) { toast('Die Frage ist zu kurz.', true); input.focus(); return; }
-    const res = await act('turn:ask', { text });
-    if (res.ok) input.value = '';
+    const btn = e.currentTarget.querySelector('button[type=submit]');
+    const res = await withBusy([btn], () => act('turn:ask', { text }));
+    if (res && res.ok) input.value = '';
   });
 
   function answer(value) {
     const q = state && state.turn.question;
-    if (q) act('turn:answer', { questionId: q.id, answer: value });
+    if (!q) return;
+    withBusy([$('yes-btn'), $('no-btn')], () => act('turn:answer', { questionId: q.id, answer: value }));
   }
   $('yes-btn').addEventListener('click', () => answer('yes'));
   $('no-btn').addEventListener('click', () => answer('no'));
-  $('pass-btn').addEventListener('click', () => act('turn:pass'));
+  $('pass-btn').addEventListener('click', () => withBusy([$('pass-btn')], () => act('turn:pass')));
 
   $('chat-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -284,7 +387,6 @@
 
   function updateGuessList() {
     const input = $('guess-input');
-    const list = $('guess-list');
     const q = norm(input.value);
     guessSelection = null;
     const exact = champions.find((c) => norm(c.name) === q);
@@ -306,7 +408,7 @@
     const input = $('guess-input');
     list.replaceChildren();
     if (!guessMatches.length) {
-      list.append(h('li', { role: 'option', 'aria-disabled': 'true' }, 'Kein Champion gefunden'));
+      list.append(h('li', { role: 'option', 'aria-disabled': 'true', 'aria-selected': 'false' }, 'Kein Champion gefunden'));
     }
     guessMatches.forEach((c, i) => {
       const li = h('li', { id: `opt-${c.id}`, role: 'option', 'aria-selected': String(i === guessActive) },
@@ -337,16 +439,21 @@
     $('guess-btn').focus();
   }
 
+  let guessing = false;
   async function submitGuess() {
-    if (!guessSelection) return;
+    if (!guessSelection || guessing) return;
+    guessing = true;
     const champ = champById.get(guessSelection);
+    $('guess-btn').setAttribute('aria-disabled', 'true');
     const res = await act('turn:guess', { championId: guessSelection });
+    $('guess-btn').removeAttribute('aria-disabled');
+    guessing = false;
     if (res.ok) {
       $('guess-input').value = '';
       guessSelection = null;
-      $('guess-btn').disabled = true;
       toast(res.correct ? `Richtig! Du bist ${champ.name}.` : `Falsch, du bist nicht ${champ.name}. Der Nächste ist dran.`, !res.correct);
     }
+    $('guess-btn').disabled = !guessSelection;
   }
 
   $('guess-input').addEventListener('input', updateGuessList);
@@ -367,10 +474,72 @@
   });
   $('guess-btn').addEventListener('click', submitGuess);
 
+  // ---------- Änderungen erkennen: Animationen markieren, Ansagen sammeln ----------
+  const verdictWord = { yes: 'Ja', no: 'Nein' };
+
+  function diffState(before, now) {
+    const said = [];
+    if (!before || before.code !== now.code) return said; // erstes Bild: nichts animieren, nichts ansagen
+    const self = now.players.find((p) => p.isYou);
+    const name = (id) => { const p = now.players.find((x) => x.id === id); return p ? p.name : ''; };
+
+    // Lobby: neue Spieler gleiten ein.
+    const oldIds = new Set(before.players.map((p) => p.id));
+    for (const p of now.players) if (!oldIds.has(p.id)) markFresh(`player:${p.id}`);
+
+    // Verlauf: neue Einträge und frisch entschiedene Fragen.
+    const oldEntries = new Map(before.history.map((e) => [e.id, e]));
+    const lastOld = before.history.length ? before.history[before.history.length - 1].id : 0;
+    for (const e of now.history) {
+      const old = oldEntries.get(e.id);
+      if (!old && e.id > lastOld) {
+        markFresh(`log:${e.id}`);
+        if (e.type === 'system') said.push(e.text);
+        else if (e.type === 'chat' && e.playerId !== self.id) said.push(`${e.name} schreibt: ${e.text}`);
+        else if (e.type === 'guess' && e.playerId !== self.id) said.push(`${e.name} tippt auf ${e.championName}: ${e.correct ? 'richtig' : 'falsch'}.`);
+        else if (e.type === 'question' && e.askerId !== self.id && now.turn.question && now.turn.question.id === e.id) {
+          const mustAnswer = now.turn.question.required.includes(self.id);
+          said.push(`${e.askerName} fragt: ${e.text}${mustAnswer ? ' Antworte mit Ja oder Nein.' : ''}`);
+        }
+      }
+      if (old && e.type === 'question' && old.status === 'pending' && e.status !== 'pending') {
+        markFresh(`verdict:${e.id}`);
+        if (verdictWord[e.status]) said.push(`Antwort auf „${e.text}“: ${verdictWord[e.status]}.`);
+      }
+    }
+
+    // Antwort-Fortschritt: frisch beantwortete Namen.
+    const q = now.turn.question;
+    if (q) {
+      const had = new Set(before.turn.question && before.turn.question.id === q.id ? before.turn.question.answeredIds : []);
+      for (const id of q.answeredIds) if (!had.has(id)) markFresh(`pill:${q.id}:${id}`);
+    }
+
+    // Zugwechsel.
+    const turnKey = (s) => `${s.roundNumber}:${s.phase}:${s.turn.currentId}`;
+    if (now.phase === 'playing' && turnKey(before) !== turnKey(now) && now.turn.currentId) {
+      markFresh(`turn:${now.roundNumber}:${now.turn.currentId}`);
+      // Beim Rundenstart sagt der Systemeintrag „… fängt an“ schon, wer dran ist.
+      if (now.turn.currentId === self.id || before.roundNumber === now.roundNumber) said.push(now.turn.currentId === self.id ? 'Du bist dran. Stell eine Frage oder rate deinen Champion.' : `${name(now.turn.currentId)} ist dran.`);
+    }
+
+    // Rundenende.
+    if (now.phase === 'roundEnd' && before.phase !== 'roundEnd') {
+      markFresh(`ranking:${now.roundNumber}`);
+      const ranked = now.players.filter((p) => p.playing && p.placement).sort((a, b) => a.placement - b.placement);
+      said.push(`Rangfolge: ${ranked.map((p) => `Platz ${p.placement} ${p.name}, plus ${p.roundPoints}`).join('; ')}.`);
+    }
+    return said;
+  }
+
   // ---------- Rendering ----------
   function render() {
     if (!state) return showScreen('home');
+    const said = diffState(prev, state);
     document.querySelectorAll('[data-rule]').forEach((el) => { el.textContent = state.rules[el.dataset.rule] || ''; });
+    const codeLabel = `Raumcode ${state.code.split('').join(' ')}, Einladungslink kopieren`;
+    $('lobby-code').setAttribute('aria-label', codeLabel);
+    $('game-code').setAttribute('aria-label', codeLabel);
     if (state.phase === 'lobby') {
       showScreen('lobby');
       renderLobby();
@@ -378,6 +547,8 @@
       showScreen('game');
       renderGame();
     }
+    if (said.length) announce(said.join(' '));
+    prev = state;
   }
 
   function me() {
@@ -399,10 +570,11 @@
     const self = me();
     $('lobby-code').textContent = state.code;
     $('lobby-count').textContent = `${state.players.length} / 10`;
-    $('lobby-players').replaceChildren(...state.players.map((p) =>
-      h('li', { class: p.isYou ? 'is-you' : null },
-        h('span', { class: 'player-name' }, p.name, p.isYou ? ' (du)' : ''),
-        ...playerTags(p))));
+    $('lobby-players').replaceChildren(...state.players.map((p) => {
+      const li = h('li', { class: p.isYou ? 'is-you' : null }, nameEl(p), ...playerTags(p));
+      animateIfFresh(li, `player:${p.id}`, 'is-new');
+      return li;
+    }));
     const connected = state.players.filter((p) => p.connected).length;
     const enough = connected >= state.limits.minPlayers;
     $('start-btn').hidden = !self.isHost;
@@ -410,7 +582,7 @@
     const host = byId(state.hostId);
     $('lobby-wait').textContent = self.isHost
       ? (enough ? 'Alle da? Dann los.' : 'Warte auf mindestens einen Mitspieler. Teile den Raumcode.')
-      : `Warte, bis ${host ? host.name : 'der Host'} die Runde startet.`;
+      : `Warte, bis ${host ? iso(host.name) : 'der Host'} die Runde startet.`;
     document.title = 'Lobby – LoL – Wer bin ich?';
   }
 
@@ -420,13 +592,16 @@
     const q = t.question;
     const current = byId(t.currentId);
     const myTurn = state.phase === 'playing' && t.currentId === self.id;
+    const panel = $('turn-panel');
+    const focusBefore = document.activeElement;
+    const focusWasInPanel = panel.contains(focusBefore) && focusBefore !== panel;
 
     $('game-code').textContent = state.code;
     $('round-label').textContent = `Runde ${state.roundNumber}`;
     $('restart-btn').hidden = !(self.isHost && state.phase === 'playing');
 
-    const panel = $('turn-panel');
     panel.classList.toggle('is-active', myTurn);
+    if (myTurn && !lastTurnWasMine && prev) replay(panel, 'turn-flash');
     const show = { ask: false, answer: false, progress: false, guess: false, end: false };
     let title = '';
     let sub = '';
@@ -451,7 +626,7 @@
     } else {
       const askerName = current ? current.name : '';
       if (q && q.askerId !== self.id) {
-        title = `${byId(q.askerId) ? byId(q.askerId).name : askerName} fragt`;
+        title = `${iso(byId(q.askerId) ? byId(q.askerId).name : askerName)} fragt`;
         $('answer-question').textContent = q.text;
         if (q.yourAnswer) {
           sub = `Du hast mit ${q.yourAnswer === 'yes' ? 'Ja' : 'Nein'} geantwortet.`;
@@ -461,7 +636,7 @@
         }
         show.progress = true;
       } else if (current) {
-        title = `${current.name} ist dran`;
+        title = `${iso(current.name)} ist dran`;
         sub = 'Warte auf die nächste Frage.';
       } else {
         title = 'Warte auf Spieler';
@@ -471,7 +646,11 @@
       else if (self.solved) sub = `${sub} Du hast deinen Champion schon erraten.`;
     }
 
-    $('turn-title').textContent = title;
+    const titleEl = $('turn-title');
+    if (titleEl.textContent !== title) {
+      titleEl.textContent = title;
+      if (prev) replay(titleEl, 'is-changed');
+    }
     $('turn-sub').textContent = sub;
     $('ask-form').hidden = !show.ask;
     $('answer-box').hidden = !show.answer;
@@ -481,7 +660,13 @@
     if (show.progress) renderProgress(q);
     if (!show.guess) closeGuessList();
 
-    if (myTurn && !lastTurnWasMine && document.activeElement === document.body && !q) $('ask-input').focus();
+    // Fokus nie im Nichts verlieren: Wurde das fokussierte Element ausgeblendet (z. B. nach
+    // „Ja“), springt er auf die Überschrift des Zug-Panels. Wird man selbst dran, landet er im
+    // Fragefeld, aber nur mit Maus/Tastatur (auf dem Handy würde sonst die Tastatur aufspringen).
+    const focusLost = focusWasInPanel && !isShown(focusBefore);
+    const focusFree = document.activeElement === document.body || focusLost;
+    if (myTurn && !lastTurnWasMine && !q && focusFree && finePointer()) $('ask-input').focus({ preventScroll: true });
+    else if (focusLost) titleEl.focus({ preventScroll: true });
     lastTurnWasMine = myTurn;
     document.title = `${myTurn ? '(Du bist dran) ' : ''}LoL – Wer bin ich?`;
 
@@ -495,7 +680,12 @@
     const pills = q.required.map((id) => {
       const p = byId(id);
       const answered = done.has(id);
-      return h('span', { class: `pill${answered ? ' done' : ''}` }, `${p ? p.name : '?'} ${answered ? '✓' : '…'}`);
+      const pill = h('span', { class: `pill${answered ? ' done' : ''}` },
+        h('bdi', null, p ? p.name : '?'),
+        h('span', { class: 'mark', 'aria-hidden': 'true' }, answered ? '✓' : '…'),
+        h('span', { class: 'visually-hidden' }, answered ? ' hat geantwortet' : ' antwortet noch'));
+      if (answered) animateIfFresh(pill, `pill:${q.id}:${id}`, 'is-new');
+      return pill;
     });
     const count = q.required.filter((id) => done.has(id)).length;
     $('answer-progress').replaceChildren(
@@ -504,54 +694,68 @@
 
   function renderRoundEnd(self) {
     const ranked = state.players.filter((p) => p.playing && p.placement).sort((a, b) => a.placement - b.placement);
-    $('round-ranking').replaceChildren(...ranked.map((p) =>
-      h('li', null,
-        h('span', { class: 'place', 'aria-label': `Platz ${p.placement}` }, `${p.placement}.`),
-        p.champion ? champImg(p.champion, 48) : h('span', { class: 'ph' }, '?'),
-        h('span', { class: 'who' },
-          h('strong', null, p.name, p.isYou ? ' (du)' : ''),
-          h('span', null, `${p.champion ? p.champion.name : '?'}, ${plural(p.questions, 'Frage', 'Fragen')}, ${plural(p.wrongGuesses, 'Fehltipp', 'Fehltipps')}`)),
-        h('span', { class: 'pts' }, `+${p.roundPoints}`))));
+    const sig = JSON.stringify(ranked.map((p) => [p.id, p.name, p.placement, p.roundPoints, p.champion && p.champion.id, p.questions, p.wrongGuesses, p.isYou]));
+    if (sig !== sigs.ranking) {
+      sigs.ranking = sig;
+      $('round-ranking').replaceChildren(...ranked.map((p, i) => {
+        const li = h('li', null,
+          h('span', { class: 'place' }, h('span', { class: 'visually-hidden' }, 'Platz '), `${p.placement}.`),
+          p.champion ? champImg(p.champion, 48) : h('span', { class: 'ph', 'aria-hidden': 'true' }, '?'),
+          h('span', { class: 'who' },
+            h('strong', null, h('bdi', null, p.name), p.isYou ? ' (du)' : ''),
+            h('span', null, `${p.champion ? p.champion.name : '?'}, ${plural(p.questions, 'Frage', 'Fragen')}, ${plural(p.wrongGuesses, 'Fehltipp', 'Fehltipps')}`)),
+          h('span', { class: 'pts' }, h('span', { class: 'visually-hidden' }, 'Punkte: '), `+${p.roundPoints}`));
+        animateIfFresh(li, `ranking:${state.roundNumber}`, 'is-enter', 80 + i * 60);
+        return li;
+      }));
+    }
     $('next-round-btn').hidden = !self.isHost;
     const host = byId(state.hostId);
-    $('next-round-wait').textContent = self.isHost ? '' : `Warte, bis ${host ? host.name : 'der Host'} die nächste Runde startet.`;
+    $('next-round-wait').textContent = self.isHost ? '' : `Warte, bis ${host ? iso(host.name) : 'der Host'} die nächste Runde startet.`;
   }
 
   function renderCards(self) {
     const ownVisible = !!(self.champion);
-    const animateOwn = lastOwnVisible === false && ownVisible;
+    if (lastOwnVisible === false && ownVisible) markFresh(`reveal:${state.roundNumber}:${self.id}`);
     lastOwnVisible = self.playing ? ownVisible : null;
 
-    const cards = state.players.filter((p) => p.playing).map((p) => {
+    const playing = state.players.filter((p) => p.playing);
+    const sig = JSON.stringify([state.phase, state.roundNumber, state.turn.currentId, playing.map((p) =>
+      [p.id, p.name, p.connected, p.isHost, p.placement, p.questions, p.wrongGuesses, p.champion && p.champion.id])]);
+    if (sig === sigs.cards) return;
+    sigs.cards = sig;
+
+    const cards = playing.map((p) => {
       const isTurn = state.phase === 'playing' && p.id === state.turn.currentId;
       const classes = ['card'];
       if (isTurn) classes.push('is-turn');
       if (p.isYou) classes.push('is-you');
       if (!p.connected) classes.push('is-off');
-      if (p.isYou && animateOwn) classes.push('reveal');
 
       const portrait = h('div', { class: 'portrait' });
       if (p.champion) portrait.append(champImg(p.champion, 120));
       else portrait.append(h('div', { class: 'sealed', 'aria-hidden': 'true' }, h('span', null, '?')));
-      if (isTurn) portrait.append(h('span', { class: 'badge badge-turn' }, 'Am Zug'));
-      if (p.placement) portrait.append(h('span', { class: 'badge badge-place', 'aria-label': `Platz ${p.placement}` }, `#${p.placement}`));
+      if (isTurn) portrait.append(h('span', { class: 'badge badge-turn', 'aria-hidden': 'true' }, 'Am Zug'));
+      if (p.placement) portrait.append(h('span', { class: 'badge badge-place', 'aria-hidden': 'true' }, `#${p.placement}`));
 
       const champName = p.champion ? p.champion.name : (p.isYou ? 'Wer bin ich?' : 'Verdeckt');
+      const status = [isTurn ? 'am Zug' : null, p.placement ? `Platz ${p.placement}` : null].filter(Boolean).join(', ');
       const body = h('div', { class: 'card-body' },
         h('span', { class: 'champ-name', 'data-testid': 'champ-name' }, champName),
         p.champion && p.champion.title ? h('span', { class: 'champ-title' }, p.champion.title) : null,
-        h('span', { class: 'card-player' },
-          h('span', { class: 'player-name', 'data-testid': 'player-name' }, p.name, p.isYou ? ' (du)' : ''),
-          ...playerTags(p)),
+        h('span', { class: 'card-player' }, nameEl(p), ...playerTags(p)),
         h('span', { class: 'card-stats' },
-          `${plural(p.questions, 'Frage', 'Fragen')}${p.wrongGuesses ? `, ${plural(p.wrongGuesses, 'Fehltipp', 'Fehltipps')}` : ''}`));
+          `${plural(p.questions, 'Frage', 'Fragen')}${p.wrongGuesses ? `, ${plural(p.wrongGuesses, 'Fehltipp', 'Fehltipps')}` : ''}`),
+        status ? h('span', { class: 'visually-hidden' }, `, ${status}`) : null);
 
-      return h('li', {
+      const li = h('li', {
         class: classes.join(' '),
         'data-player-id': p.id,
         'data-champion-id': p.champion ? p.champion.id : null,
-        'aria-label': `${p.name}${p.isYou ? ' (du)' : ''}: ${p.champion ? p.champion.name : 'verdeckt'}${isTurn ? ', am Zug' : ''}`,
       }, h('div', { class: 'card-inner' }, portrait, body));
+      if (isTurn) animateIfFresh(li, `turn:${state.roundNumber}:${p.id}`, 'turn-in');
+      if (p.isYou) animateIfFresh(li, `reveal:${state.roundNumber}:${p.id}`, 'reveal');
+      return li;
     });
     $('cards').replaceChildren(...cards);
   }
@@ -560,45 +764,80 @@
 
   function renderLog() {
     const log = $('log');
+    const sig = JSON.stringify(state.history.map((e) => [e.id, e.status, e.answeredIds && e.answeredIds.length]));
+    if (sig === sigs.log) return;
+    sigs.log = sig;
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
     const items = state.history.map((e) => {
       const time = h('time', { datetime: new Date(e.ts).toISOString() }, fmtTime(e.ts));
-      if (e.type === 'system') return h('li', { class: 'is-system' }, h('span', { class: 'text' }, e.text), ' ', time);
-      if (e.type === 'chat') {
-        return h('li', null, h('div', { class: 'meta' }, h('strong', null, e.name), time), h('div', { class: 'text' }, e.text));
-      }
-      if (e.type === 'guess') {
-        return h('li', { class: e.correct ? 'is-correct' : 'is-no' },
-          h('div', { class: 'meta' }, h('strong', null, e.name),
+      let li;
+      if (e.type === 'system') {
+        li = h('li', { class: 'is-system' }, h('span', { class: 'text' }, e.text), ' ', time);
+      } else if (e.type === 'chat') {
+        li = h('li', null, h('div', { class: 'meta' }, h('strong', null, h('bdi', null, e.name)), time), h('div', { class: 'text' }, e.text));
+      } else if (e.type === 'guess') {
+        li = h('li', { class: e.correct ? 'is-correct' : 'is-no' },
+          h('div', { class: 'meta' }, h('strong', null, h('bdi', null, e.name)),
             h('span', { class: `verdict ${e.correct ? 'correct' : 'no'}` }, e.correct ? 'richtig' : 'falsch'), time),
           h('div', { class: 'text' }, `tippt auf ${e.championName}`));
+      } else {
+        // Frage
+        const status = e.status;
+        const cls = status === 'yes' ? 'is-yes' : status === 'no' ? 'is-no' : null;
+        const vClass = status === 'yes' ? 'yes' : status === 'no' ? 'no' : status === 'pending' ? 'pending' : 'other';
+        let detail = null;
+        if (e.answers && e.answers.length) {
+          detail = h('div', { class: 'answers' }, ...e.answers.flatMap((a, i) =>
+            [i ? ', ' : null, h('bdi', null, a.name), `: ${a.answer === 'yes' ? 'Ja' : 'Nein'}`]));
+        } else if (status === 'pending') {
+          const n = (e.answeredIds || []).length;
+          detail = h('div', { class: 'answers' }, n === 1 ? '1 Antwort bisher' : `${n} Antworten bisher`);
+        }
+        const verdict = h('span', { class: `verdict ${vClass}` }, verdictLabel[status] || status);
+        animateIfFresh(verdict, `verdict:${e.id}`, 'is-new');
+        li = h('li', { class: cls },
+          h('div', { class: 'meta' }, h('strong', null, h('bdi', null, e.askerName)), verdict, time),
+          h('div', { class: 'text q-text' }, e.text), detail);
       }
-      // Frage
-      const status = e.status;
-      const cls = status === 'yes' ? 'is-yes' : status === 'no' ? 'is-no' : null;
-      const vClass = status === 'yes' ? 'yes' : status === 'no' ? 'no' : status === 'pending' ? 'pending' : 'other';
-      let detail = null;
-      if (e.answers && e.answers.length) {
-        detail = h('div', { class: 'answers' }, e.answers.map((a) => `${a.name}: ${a.answer === 'yes' ? 'Ja' : 'Nein'}`).join(', '));
-      } else if (status === 'pending') {
-        detail = h('div', { class: 'answers' }, `${(e.answeredIds || []).length} Antwort(en) bisher`);
-      }
-      return h('li', { class: cls },
-        h('div', { class: 'meta' }, h('strong', null, e.askerName),
-          h('span', { class: `verdict ${vClass}` }, verdictLabel[status] || status), time),
-        h('div', { class: 'text q-text' }, e.text), detail);
+      animateIfFresh(li, `log:${e.id}`, 'is-new');
+      return li;
     });
-    log.replaceChildren(...items);
+    log.replaceChildren(...(items.length ? items : [h('li', { class: 'is-system log-empty' }, 'Noch nichts passiert.')]));
     if (atBottom) log.scrollTop = log.scrollHeight;
   }
 
   function renderScores() {
+    const list = $('scores');
     const sorted = [...state.players].sort((a, b) => b.totalScore - a.totalScore || a.name.localeCompare(b.name, 'de'));
-    $('scores').replaceChildren(...sorted.map((p, i) =>
-      h('li', null,
+    const spectating = (p) => !(p.playing || state.phase === 'roundEnd');
+    const sig = JSON.stringify(sorted.map((p) => [p.id, p.name, p.totalScore, spectating(p), p.isYou]));
+    if (sig === sigs.scores) return;
+    sigs.scores = sig;
+
+    // FLIP: alte Positionen merken, neu rendern, Zeilen von alt nach neu gleiten lassen.
+    const oldTop = new Map();
+    const oldScore = new Map();
+    for (const li of list.children) {
+      oldTop.set(li.dataset.id, li.getBoundingClientRect().top);
+      oldScore.set(li.dataset.id, Number(li.dataset.score));
+    }
+    list.replaceChildren(...sorted.map((p, i) =>
+      h('li', { 'data-id': p.id, 'data-score': p.totalScore },
         h('span', { class: 'rank' }, `${i + 1}.`),
-        h('span', { class: `name${p.isYou ? ' is-you' : ''}` }, p.name, p.playing || state.phase === 'roundEnd' ? '' : ' (schaut zu)'),
+        h('span', { class: `name${p.isYou ? ' is-you' : ''}` }, h('bdi', null, p.name), spectating(p) ? ' (schaut zu)' : ''),
         h('span', { class: 'pts' }, String(p.totalScore)))));
+    if (!prev || !oldTop.size) return;
+    const motion = !reducedMotion();
+    for (const li of list.children) {
+      const id = li.dataset.id;
+      if (oldScore.has(id) && Number(li.dataset.score) > oldScore.get(id)) li.querySelector('.pts').classList.add('bump');
+      if (!motion || !oldTop.has(id) || !li.animate) continue;
+      const dy = oldTop.get(id) - li.getBoundingClientRect().top;
+      if (Math.abs(dy) > 1) {
+        li.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }],
+          { duration: 420, easing: 'cubic-bezier(0.77, 0, 0.175, 1)' });
+      }
+    }
   }
 
   // ---------- Start ----------
@@ -612,7 +851,7 @@
     showScreen('home');
     const recovery = loadRecovery();
     if (isSession(recovery)) {
-      $('rejoin-text').textContent = `Du warst zuletzt in Raum ${recovery.code}${recovery.name ? ` als ${recovery.name}` : ''}.`;
+      $('rejoin-text').textContent = `Du warst zuletzt in Raum ${recovery.code}${recovery.name ? ` als ${iso(recovery.name)}` : ''}.`;
       $('rejoin-box').hidden = false;
       $('rejoin-btn').addEventListener('click', () => {
         session = recovery;
@@ -622,6 +861,7 @@
       $('rejoin-dismiss').addEventListener('click', () => {
         safe(() => localStorage.removeItem(SESSION_KEY));
         $('rejoin-box').hidden = true;
+        $('name-input').focus();
       });
     }
   }
