@@ -155,6 +155,17 @@ test('Neustart verwirft Rundenpunkte und rotiert den Startspieler', () => {
   assert.equal(room.turn.currentId, b.id);
 });
 
+test('Neustart leert Fragen und Verlauf', () => {
+  const { room, players } = setup(2);
+  const [a] = players;
+  room.startRound(a.id);
+  assert.equal(room.ask(a.id, 'Bin ich ein Magier?').ok, true);
+  assert.ok(room.history.some((h) => h.type === 'question'));
+  assert.equal(room.restartRound(a.id).ok, true);
+  assert.equal(room.history.some((h) => h.type === 'question'), false);
+  assert.equal(room.turn.question, null);
+});
+
 test('Texteingaben werden bereinigt und begrenzt', () => {
   assert.equal(cleanText('  a\u0000b\n\nc  ', 10), 'a b c');
   assert.equal(cleanText('x'.repeat(500), 20).length, 20);

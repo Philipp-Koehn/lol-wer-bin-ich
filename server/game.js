@@ -189,6 +189,7 @@ class Room {
   restartRound(byId) {
     if (byId !== this.hostId) return fail('Nur der Host kann neu starten.');
     if (this.phase !== 'playing') return fail('Es läuft keine Runde.');
+    this.history = []; // Fragen & Verlauf starten wieder bei null (seq läuft weiter, IDs bleiben eindeutig)
     this.log('system', { text: `Runde ${this.roundNumber} wurde vom Host abgebrochen. Punkte dieser Runde verfallen.` });
     for (const p of this.players.values()) p.round = this.emptyRound(false);
     return this.beginRound();
